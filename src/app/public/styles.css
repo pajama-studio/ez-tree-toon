@@ -658,6 +658,32 @@ a {
   height: 16px;
 }
 
+.panel-button:disabled {
+  cursor: progress;
+  color: var(--text-secondary);
+}
+
+.panel-button:disabled:hover {
+  background: var(--input-bg);
+  border-color: var(--input-border);
+}
+
+.panel-button:disabled:active {
+  background: var(--input-bg);
+  transform: none;
+}
+
+.icon-spin {
+  transform-origin: 50% 50%;
+  animation: icon-spin 0.8s linear infinite;
+}
+
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ============================================================================
    Display (Read-only values)
    ============================================================================ */

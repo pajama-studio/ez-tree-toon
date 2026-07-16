@@ -81,6 +81,11 @@ const icons = {
     <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
   </svg>`,
 
+  spinner: `<svg class="icon icon-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <circle cx="12" cy="12" r="9" opacity="0.25" />
+    <path stroke-linecap="round" d="M21 12a9 9 0 0 0-9-9" />
+  </svg>`,
+
   // Arrow icon for sections
   chevronRight: `<svg class="section-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
@@ -291,13 +296,48 @@ function createToggle(label, value, onChange) {
 }
 
 /**
- * Creates a button
+ * Yields to the browser long enough for pending DOM updates to paint before
+ * blocking work resumes on the main thread.
+ */
+function paint() {
+  return new Promise((resolve) =>
+    requestAnimationFrame(() => setTimeout(resolve, 0)),
+  );
+}
+
+/**
+ * Creates a button.
+ *
+ * `onClick` is called with a `setStatus(text)` callback. If it returns a
+ * promise, the button shows a spinner and stays disabled until it settles.
  */
 function createButton(label, iconKey, onClick) {
   const button = document.createElement('button');
   button.className = 'panel-button';
-  button.innerHTML = `${icons[iconKey] || ''}<span>${label}</span>`;
-  button.addEventListener('click', onClick);
+  const setContent = (text, key) => {
+    button.innerHTML = `${icons[key] || ''}<span>${text}</span>`;
+  };
+  setContent(label, iconKey);
+
+  let statusSet = false;
+  const setStatus = (text) => {
+    statusSet = true;
+    setContent(text, 'spinner');
+  };
+
+  button.addEventListener('click', () => {
+    if (button.disabled) return;
+    statusSet = false;
+    const result = onClick({ setStatus });
+    if (!result?.then) return;
+
+    button.disabled = true;
+    if (!statusSet) setStatus('Working…');
+    result.finally(() => {
+      button.disabled = false;
+      setContent(label, iconKey);
+    });
+  });
   return { element: button };
 }
 
@@ -1118,44 +1158,43 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     return () => restores.forEach((restore) => restore());
   }
 
-  const exportGlbBtn = createButton('Export GLB (Full Detail)', 'download', () => {
+  const exportGlbBtn = createButton('Export GLB (Full Detail)', 'download', async ({ setStatus }) => {
+    setStatus('Exporting GLB…');
     // Export at full detail regardless of the active LOD preview
     const restoreLevel = previewLevel;
     if (restoreLevel !== 0) {
       setPreviewLevel(0);
     }
     const restoreTextures = stripBrokenTextures(tree);
-    const restore = () => {
+    try {
+      await paint();
+      const glb = await new Promise((resolve, reject) =>
+        exporter.parse(tree, resolve, reject, { binary: true }),
+      );
+      const blob = new Blob([glb], { type: 'application/octet-stream' });
+      const link = document.getElementById('downloadLink');
+      link.href = window.URL.createObjectURL(blob);
+      link.download = 'tree.glb';
+      link.click();
+    } catch (err) {
+      console.error(err);
+    } finally {
       restoreTextures();
       if (restoreLevel !== 0) {
         setPreviewLevel(restoreLevel);
       }
-    };
-    exporter.parse(
-      tree,
-      (glb) => {
-        const blob = new Blob([glb], { type: 'application/octet-stream' });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.getElementById('downloadLink');
-        link.href = url;
-        link.download = 'tree.glb';
-        link.click();
-        restore();
-      },
-      (err) => {
-        console.error(err);
-        restore();
-      },
-      { binary: true }
-    );
+    }
   });
   exportModelsSection.add(exportGlbBtn);
 
-  const exportLodsBtn = createButton('Export LODs (ZIP)', 'archive', async () => {
+  const exportLodsBtn = createButton('Export LODs (ZIP)', 'archive', async ({ setStatus }) => {
     const restoreTextures = stripBrokenTextures(tree);
     try {
       const files = {};
       for (let i = 0; i < Tree.defaultLODLevels.length; i++) {
+        setStatus(`Exporting LOD ${i + 1}/${Tree.defaultLODLevels.length}…`);
+        await paint();
+
         const { detail } = Tree.defaultLODLevels[i];
         const { branches, leaves } = tree.createGeometry(detail ?? {});
 
@@ -1178,6 +1217,9 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
         }
       }
 
+      setStatus('Zipping…');
+      await paint();
+
       const blob = new Blob([zipSync(files)], { type: 'application/zip' });
       const link = document.getElementById('downloadLink');
       link.href = URL.createObjectURL(blob);
@@ -1191,7 +1233,10 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   });
   exportModelsSection.add(exportLodsBtn);
 
-  const exportPngBtn = createButton('Export PNG', 'photo', () => {
+  const exportPngBtn = createButton('Export PNG', 'photo', async ({ setStatus }) => {
+    setStatus('Exporting PNG…');
+    await paint();
+
     renderer.setClearColor(0, 0);
     const fog = scene.fog;
     scene.fog = null;
@@ -1205,21 +1250,25 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     });
     tree.traverse((o) => o.visible = true);
 
-    renderer.render(scene, camera);
+    try {
+      renderer.render(scene, camera);
 
-    const link = document.getElementById('downloadLink');
-    link.href = renderer.domElement.toDataURL('image/png');
-    link.download = 'tree.png';
-    link.click();
-
-    renderer.setClearColor(0);
-    scene.fog = fog;
-    scene.traverse((o) => {
-      if (o.name === 'Skybox') {
-        o.material.side = THREE.BackSide;
-      }
-      o.visible = true;
-    });
+      const link = document.getElementById('downloadLink');
+      link.href = renderer.domElement.toDataURL('image/png');
+      link.download = 'tree.png';
+      link.click();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      renderer.setClearColor(0);
+      scene.fog = fog;
+      scene.traverse((o) => {
+        if (o.name === 'Skybox') {
+          o.material.side = THREE.BackSide;
+        }
+        o.visible = true;
+      });
+    }
   });
   exportModelsSection.add(exportPngBtn);
 
