@@ -127,9 +127,17 @@ function createSlider(label, value, min, max, step, onChange) {
   valueInput.value = formatValue(value, step);
   valueInput.step = step;
 
+  // Fill the track up to the current value so it reads at a glance
+  const setFill = () => {
+    const pct = ((parseFloat(slider.value) - min) / (max - min || 1)) * 100;
+    slider.style.setProperty('--fill', `${pct}%`);
+  };
+  setFill();
+
   slider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     valueInput.value = formatValue(val, step);
+    setFill();
     onChange(val);
   });
 
@@ -138,6 +146,7 @@ function createSlider(label, value, min, max, step, onChange) {
     if (isNaN(val)) val = min;
     slider.value = val;
     valueInput.value = formatValue(val, step);
+    setFill();
     onChange(val);
   });
 
@@ -151,6 +160,7 @@ function createSlider(label, value, min, max, step, onChange) {
     setValue: (v) => {
       slider.value = v;
       valueInput.value = formatValue(v, step);
+      setFill();
     }
   };
 }
@@ -330,15 +340,19 @@ function createSection(title, iconKey, expanded = false) {
     ${icons.chevronRight}
   `;
 
+  const contentWrap = document.createElement('div');
+  contentWrap.className = 'section-content';
+
   const content = document.createElement('div');
-  content.className = 'section-content';
+  content.className = 'section-content-inner';
+  contentWrap.appendChild(content);
 
   header.addEventListener('click', () => {
     section.classList.toggle('expanded');
   });
 
   section.appendChild(header);
-  section.appendChild(content);
+  section.appendChild(contentWrap);
 
   return {
     element: section,
@@ -362,8 +376,12 @@ function createSubSection(title, expanded = false) {
     ${icons.chevronRightSmall}
   `;
 
+  const contentWrap = document.createElement('div');
+  contentWrap.className = 'subsection-content';
+
   const content = document.createElement('div');
-  content.className = 'subsection-content';
+  content.className = 'subsection-content-inner';
+  contentWrap.appendChild(content);
 
   header.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -371,7 +389,7 @@ function createSubSection(title, expanded = false) {
   });
 
   section.appendChild(header);
-  section.appendChild(content);
+  section.appendChild(contentWrap);
 
   return {
     element: section,
@@ -410,6 +428,7 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   const header = document.createElement('div');
   header.className = 'panel-header';
   header.innerHTML = `
+    <div class="panel-grabber" aria-hidden="true"></div>
     <button class="panel-mobile-toggle" aria-label="Toggle panel">
       ${icons.chevronUp}
     </button>
@@ -468,6 +487,7 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   // its geometry at a chosen level via createGeometry() so it can be
   // inspected at any camera distance without THREE.LOD auto-switching.
   let previewLevel = 0;
+  let lastBuildMs = null;
 
   const statsOverlay = document.createElement('div');
   statsOverlay.id = 'stats-overlay';
@@ -481,6 +501,10 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
         <span class="stats-value" data-stat="vertices">0</span>
         <span class="stats-label">vertices</span>
       </div>
+      <div class="stats-stat">
+        <span class="stats-value" data-stat="buildtime">–</span>
+        <span class="stats-label">build ms</span>
+      </div>
     </div>
     <div class="lod-switcher"></div>
   `;
@@ -488,6 +512,14 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
 
   const statsTriangles = statsOverlay.querySelector('[data-stat="triangles"]');
   const statsVertices = statsOverlay.querySelector('[data-stat="vertices"]');
+  const statsBuildTime = statsOverlay.querySelector('[data-stat="buildtime"]');
+
+  /** Briefly highlights a stat value so live changes are visible */
+  function pulseStat(el) {
+    el.classList.remove('pulse');
+    void el.offsetWidth;
+    el.classList.add('pulse');
+  }
 
   const lodSwitcher = statsOverlay.querySelector('.lod-switcher');
   const lodButtons = Tree.defaultLODLevels.map((level, i) => {
@@ -504,7 +536,9 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
 
   function applyLODPreview() {
     const detail = Tree.defaultLODLevels[previewLevel]?.detail ?? {};
+    const t0 = performance.now();
     const { branches, leaves } = tree.createGeometry(detail);
+    lastBuildMs = performance.now() - t0;
     tree.branchesMesh.geometry.dispose();
     tree.branchesMesh.geometry = branches;
     tree.leavesMesh.geometry.dispose();
@@ -534,7 +568,9 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
 
   const onChange = () => {
     applyTreeTextures(tree);
+    const t0 = performance.now();
     tree.generate();
+    lastBuildMs = performance.now() - t0;
     if (previewLevel > 0) {
       applyLODPreview();
     }
@@ -1027,6 +1063,10 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     triangleDisplay.setValue(triangles);
     statsVertices.textContent = Math.round(vertices).toLocaleString();
     statsTriangles.textContent = Math.round(triangles).toLocaleString();
+    statsBuildTime.textContent = lastBuildMs == null ? '–' : Math.max(1, Math.round(lastBuildMs)).toString();
+    pulseStat(statsTriangles);
+    pulseStat(statsVertices);
+    pulseStat(statsBuildTime);
   }
 
   // ============================================================================
@@ -1189,11 +1229,12 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   const footer = document.createElement('div');
   footer.className = 'panel-footer';
   footer.innerHTML = `
-    <a href="https://threejsroadmap.com" target="_blank" class="panel-footer-link">
-      Learn Three.js
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-      </svg>
+    <p class="panel-footer-heading">Enjoying EZ-Tree? Try my other assets</p>
+    <a href="https://threejsroadmap.com/assets/threejs-water-pro?utm_source=eztree" target="_blank" class="panel-footer-link">
+      🌊 Three.js Water Pro
+    </a>
+    <a href="https://threejsroadmap.com/assets/threejs-sky-pro?utm_source=eztree" target="_blank" class="panel-footer-link">
+      ☁️ Three.js Sky Pro
     </a>
   `;
   panel.appendChild(footer);
@@ -1245,15 +1286,18 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
 }
 
 /**
- * Sets up mobile expand/collapse toggle
+ * Sets up the mobile bottom sheet: the whole header is the tap target,
+ * and the panel starts collapsed so the scene stays the hero.
  */
 function setupMobileToggle(panel, header) {
-  const toggleBtn = header.querySelector('.panel-mobile-toggle');
-  if (!toggleBtn) return;
+  const mobileQuery = window.matchMedia('(max-width: 800px)');
 
-  toggleBtn.addEventListener('click', () => {
+  header.addEventListener('click', () => {
+    if (!mobileQuery.matches) return;
     panel.classList.toggle('collapsed');
-    // Trigger resize event so canvas can adjust
-    window.dispatchEvent(new Event('resize'));
   });
+
+  if (mobileQuery.matches) {
+    panel.classList.add('collapsed');
+  }
 }
