@@ -28,20 +28,25 @@ const textureLoader = new THREE.TextureLoader();
 const barkCache = new Map();
 const leafCache = new Map();
 
-function loadColor(url) {
-  const t = textureLoader.load(url);
+// The onError callbacks below matter: a texture whose file is missing keeps
+// an undefined image forever (the dev server masks the 404 by serving
+// index.html). That renders harmlessly but breaks GLTF export, so a failed
+// load must remove the map from the cache entirely.
+
+function loadColor(url, onError) {
+  const t = textureLoader.load(url, undefined, undefined, onError);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
-function loadLinear(url) {
-  return textureLoader.load(url);
+function loadLinear(url, onError) {
+  return textureLoader.load(url, undefined, undefined, onError);
 }
 
 /**
  * Returns a cached set of THREE.Texture maps for the given bark type.
  * @param {string} type - one of BarkType values
- * @returns {{ color: THREE.Texture, ao: THREE.Texture, normal: THREE.Texture, roughness: THREE.Texture } | null}
+ * @returns {{ color: THREE.Texture, normal: THREE.Texture, roughness: THREE.Texture } | null}
  */
 export function getBarkMaps(type) {
   if (!BarkType[type]) return null;
@@ -49,12 +54,14 @@ export function getBarkMaps(type) {
 
   const dir = `${type}_1K-JPG`;
   const base = `/textures/bark/${dir}/${dir}`;
-  const maps = {
-    color: loadColor(`${base}_Color.jpg`),
-    ao: loadLinear(`${base}_AmbientOcclusion.jpg`),
-    normal: loadLinear(`${base}_NormalGL.jpg`),
-    roughness: loadLinear(`${base}_Roughness.jpg`),
+  const maps = {};
+  const drop = (key) => () => {
+    console.warn(`Missing bark texture: ${base}_… (${key}); skipping this map.`);
+    maps[key] = null;
   };
+  maps.color = loadColor(`${base}_Color.jpg`, drop('color'));
+  maps.normal = loadLinear(`${base}_NormalGL.jpg`, drop('normal'));
+  maps.roughness = loadLinear(`${base}_Roughness.jpg`, drop('roughness'));
   barkCache.set(type, maps);
   return maps;
 }
@@ -66,7 +73,10 @@ export function getBarkMaps(type) {
  */
 export function getLeafMap(type) {
   if (leafCache.has(type)) return leafCache.get(type);
-  const texture = loadColor(`/textures/leaves/${type}.png`);
+  const texture = loadColor(`/textures/leaves/${type}.png`, () => {
+    console.warn(`Missing leaf texture: /textures/leaves/${type}.png; skipping.`);
+    leafCache.set(type, null);
+  });
   texture.premultiplyAlpha = true;
   leafCache.set(type, texture);
   return texture;
@@ -82,7 +92,6 @@ export function applyTreeTextures(tree) {
   const barkMaps = getBarkMaps(tree.options.bark.type);
   if (barkMaps) {
     tree.options.bark.maps.color = barkMaps.color;
-    tree.options.bark.maps.ao = barkMaps.ao;
     tree.options.bark.maps.normal = barkMaps.normal;
     tree.options.bark.maps.roughness = barkMaps.roughness;
   }
@@ -94,11 +103,15 @@ export function applyTreeTextures(tree) {
  * the same step so the first generate sees the textures.
  * @param {import('@dgreenheck/ez-tree').Tree} tree
  * @param {string} name - key into TreePreset registry
+ * @param {boolean} generate - set false to skip the generate step when the
+ * caller will generate the tree itself (e.g. via generateLODs)
  */
-export function loadPresetWithTextures(tree, name) {
+export function loadPresetWithTextures(tree, name, generate = true) {
   const json = structuredClone(TreePreset[name]);
   if (!json) return;
   tree.options.copy(json);
   applyTreeTextures(tree);
-  tree.generate();
+  if (generate) {
+    tree.generate();
+  }
 }

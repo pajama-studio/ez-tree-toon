@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { zipSync } from 'three/addons/libs/fflate.module.js';
 import { Billboard, TreePreset, Tree, TreeType } from '@dgreenheck/ez-tree';
 import { BarkType, LeafType, applyTreeTextures, loadPresetWithTextures } from './textures';
 import { Environment } from './environment';
@@ -126,9 +127,17 @@ function createSlider(label, value, min, max, step, onChange) {
   valueInput.value = formatValue(value, step);
   valueInput.step = step;
 
+  // Fill the track up to the current value so it reads at a glance
+  const setFill = () => {
+    const pct = ((parseFloat(slider.value) - min) / (max - min || 1)) * 100;
+    slider.style.setProperty('--fill', `${pct}%`);
+  };
+  setFill();
+
   slider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     valueInput.value = formatValue(val, step);
+    setFill();
     onChange(val);
   });
 
@@ -137,6 +146,7 @@ function createSlider(label, value, min, max, step, onChange) {
     if (isNaN(val)) val = min;
     slider.value = val;
     valueInput.value = formatValue(val, step);
+    setFill();
     onChange(val);
   });
 
@@ -150,6 +160,7 @@ function createSlider(label, value, min, max, step, onChange) {
     setValue: (v) => {
       slider.value = v;
       valueInput.value = formatValue(v, step);
+      setFill();
     }
   };
 }
@@ -329,15 +340,19 @@ function createSection(title, iconKey, expanded = false) {
     ${icons.chevronRight}
   `;
 
+  const contentWrap = document.createElement('div');
+  contentWrap.className = 'section-content';
+
   const content = document.createElement('div');
-  content.className = 'section-content';
+  content.className = 'section-content-inner';
+  contentWrap.appendChild(content);
 
   header.addEventListener('click', () => {
     section.classList.toggle('expanded');
   });
 
   section.appendChild(header);
-  section.appendChild(content);
+  section.appendChild(contentWrap);
 
   return {
     element: section,
@@ -361,8 +376,12 @@ function createSubSection(title, expanded = false) {
     ${icons.chevronRightSmall}
   `;
 
+  const contentWrap = document.createElement('div');
+  contentWrap.className = 'subsection-content';
+
   const content = document.createElement('div');
-  content.className = 'subsection-content';
+  content.className = 'subsection-content-inner';
+  contentWrap.appendChild(content);
 
   header.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -370,7 +389,7 @@ function createSubSection(title, expanded = false) {
   });
 
   section.appendChild(header);
-  section.appendChild(content);
+  section.appendChild(contentWrap);
 
   return {
     element: section,
@@ -409,6 +428,7 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   const header = document.createElement('div');
   header.className = 'panel-header';
   header.innerHTML = `
+    <div class="panel-grabber" aria-hidden="true"></div>
     <button class="panel-mobile-toggle" aria-label="Toggle panel">
       ${icons.chevronUp}
     </button>
@@ -460,12 +480,100 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   scrollArea.appendChild(exportTab);
 
   // ============================================================================
+  // Stats Overlay (viewport HUD) with LOD preview switching
+  // ============================================================================
+
+  // The hero tree always generates at full detail; the LOD buttons re-mesh
+  // its geometry at a chosen level via createGeometry() so it can be
+  // inspected at any camera distance without THREE.LOD auto-switching.
+  let previewLevel = 0;
+  let lastBuildMs = null;
+
+  const statsOverlay = document.createElement('div');
+  statsOverlay.id = 'stats-overlay';
+  statsOverlay.innerHTML = `
+    <div class="stats-counts">
+      <div class="stats-stat">
+        <span class="stats-value" data-stat="triangles">0</span>
+        <span class="stats-label">triangles</span>
+      </div>
+      <div class="stats-stat">
+        <span class="stats-value" data-stat="vertices">0</span>
+        <span class="stats-label">vertices</span>
+      </div>
+      <div class="stats-stat">
+        <span class="stats-value" data-stat="buildtime">–</span>
+        <span class="stats-label">build ms</span>
+      </div>
+    </div>
+    <div class="lod-switcher"></div>
+  `;
+  container.appendChild(statsOverlay);
+
+  const statsTriangles = statsOverlay.querySelector('[data-stat="triangles"]');
+  const statsVertices = statsOverlay.querySelector('[data-stat="vertices"]');
+  const statsBuildTime = statsOverlay.querySelector('[data-stat="buildtime"]');
+
+  /** Briefly highlights a stat value so live changes are visible */
+  function pulseStat(el) {
+    el.classList.remove('pulse');
+    void el.offsetWidth;
+    el.classList.add('pulse');
+  }
+
+  const lodSwitcher = statsOverlay.querySelector('.lod-switcher');
+  const lodButtons = Tree.defaultLODLevels.map((level, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'lod-button' + (i === 0 ? ' active' : '');
+    btn.textContent = i === 0 ? 'Full' : `LOD${i}`;
+    btn.title = i === 0
+      ? 'Full detail'
+      : `Preview detail level ${i} (switches at ${level.distance} units)`;
+    btn.addEventListener('click', () => setPreviewLevel(i));
+    lodSwitcher.appendChild(btn);
+    return btn;
+  });
+
+  function applyLODPreview() {
+    const detail = Tree.defaultLODLevels[previewLevel]?.detail ?? {};
+    const t0 = performance.now();
+    const { branches, leaves } = tree.createGeometry(detail);
+    lastBuildMs = performance.now() - t0;
+    tree.branchesMesh.geometry.dispose();
+    tree.branchesMesh.geometry = branches;
+    tree.leavesMesh.geometry.dispose();
+    tree.leavesMesh.geometry = leaves;
+  }
+
+  function setPreviewLevel(level) {
+    previewLevel = level;
+    lodButtons.forEach((b, i) => b.classList.toggle('active', i === level));
+    applyLODPreview();
+    updateInfoDisplays();
+  }
+
+  /** Vertex/triangle counts of the geometry currently on screen */
+  function displayedCounts() {
+    const gb = tree.branchesMesh.geometry;
+    const gl = tree.leavesMesh.geometry;
+    return {
+      vertices: (gb.attributes.position?.count ?? 0) + (gl.attributes.position?.count ?? 0),
+      triangles: ((gb.index?.count ?? 0) + (gl.index?.count ?? 0)) / 3,
+    };
+  }
+
+  // ============================================================================
   // Parameters Tab Content
   // ============================================================================
 
   const onChange = () => {
     applyTreeTextures(tree);
+    const t0 = performance.now();
     tree.generate();
+    lastBuildMs = performance.now() - t0;
+    if (previewLevel > 0) {
+      applyLODPreview();
+    }
     tree.traverse((o) => {
       if (o.material) {
         o.material.needsUpdate = true;
@@ -483,6 +591,9 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     initialPreset,
     (val) => {
       loadPresetWithTextures(tree, val);
+      if (previewLevel > 0) {
+        applyLODPreview();
+      }
       refreshAllControls();
     }
   );
@@ -947,8 +1058,15 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   parametersTab.appendChild(infoSection.element);
 
   function updateInfoDisplays() {
-    vertexDisplay.setValue(tree.vertexCount);
-    triangleDisplay.setValue(tree.triangleCount);
+    const { vertices, triangles } = displayedCounts();
+    vertexDisplay.setValue(vertices);
+    triangleDisplay.setValue(triangles);
+    statsVertices.textContent = Math.round(vertices).toLocaleString();
+    statsTriangles.textContent = Math.round(triangles).toLocaleString();
+    statsBuildTime.textContent = lastBuildMs == null ? '–' : Math.max(1, Math.round(lastBuildMs)).toString();
+    pulseStat(statsTriangles);
+    pulseStat(statsVertices);
+    pulseStat(statsBuildTime);
   }
 
   // ============================================================================
@@ -976,7 +1094,43 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
 
   const exportModelsSection = createSection('Export Models', 'cubeTransparent', true);
 
-  const exportGlbBtn = createButton('Export GLB', 'download', () => {
+  /**
+   * GLTFExporter aborts on textures whose image never loaded (e.g. the
+   * texture file is missing on disk). Rendering tolerates them, so strip
+   * them from the materials for the duration of an export and restore after.
+   * @param {THREE.Object3D} root
+   * @returns {() => void} restore function
+   */
+  function stripBrokenTextures(root) {
+    const restores = [];
+    root.traverse((o) => {
+      const materials = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      for (const material of materials) {
+        for (const key of ['map', 'aoMap', 'normalMap', 'roughnessMap', 'metalnessMap']) {
+          const texture = material[key];
+          if (texture?.isTexture && !texture.image) {
+            restores.push(() => { material[key] = texture; });
+            material[key] = null;
+          }
+        }
+      }
+    });
+    return () => restores.forEach((restore) => restore());
+  }
+
+  const exportGlbBtn = createButton('Export GLB (Full Detail)', 'download', () => {
+    // Export at full detail regardless of the active LOD preview
+    const restoreLevel = previewLevel;
+    if (restoreLevel !== 0) {
+      setPreviewLevel(0);
+    }
+    const restoreTextures = stripBrokenTextures(tree);
+    const restore = () => {
+      restoreTextures();
+      if (restoreLevel !== 0) {
+        setPreviewLevel(restoreLevel);
+      }
+    };
     exporter.parse(
       tree,
       (glb) => {
@@ -986,14 +1140,56 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
         link.href = url;
         link.download = 'tree.glb';
         link.click();
+        restore();
       },
       (err) => {
         console.error(err);
+        restore();
       },
       { binary: true }
     );
   });
   exportModelsSection.add(exportGlbBtn);
+
+  const exportLodsBtn = createButton('Export LODs (ZIP)', 'archive', async () => {
+    const restoreTextures = stripBrokenTextures(tree);
+    try {
+      const files = {};
+      for (let i = 0; i < Tree.defaultLODLevels.length; i++) {
+        const { detail } = Tree.defaultLODLevels[i];
+        const { branches, leaves } = tree.createGeometry(detail ?? {});
+
+        try {
+          const branchesMesh = new THREE.Mesh(branches, tree.branchesMesh.material);
+          branchesMesh.name = `Branches_LOD${i}`;
+          const leavesMesh = new THREE.Mesh(leaves, tree.leavesMesh.material);
+          leavesMesh.name = `Leaves_LOD${i}`;
+          const group = new THREE.Group();
+          group.name = `Tree_LOD${i}`;
+          group.add(branchesMesh, leavesMesh);
+
+          const glb = await new Promise((resolve, reject) =>
+            exporter.parse(group, resolve, reject, { binary: true }),
+          );
+          files[`tree_LOD${i}.glb`] = new Uint8Array(glb);
+        } finally {
+          branches.dispose();
+          leaves.dispose();
+        }
+      }
+
+      const blob = new Blob([zipSync(files)], { type: 'application/zip' });
+      const link = document.getElementById('downloadLink');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'tree_lods.zip';
+      link.click();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      restoreTextures();
+    }
+  });
+  exportModelsSection.add(exportLodsBtn);
 
   const exportPngBtn = createButton('Export PNG', 'photo', () => {
     renderer.setClearColor(0, 0);
@@ -1033,11 +1229,12 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   const footer = document.createElement('div');
   footer.className = 'panel-footer';
   footer.innerHTML = `
-    <a href="https://threejsroadmap.com" target="_blank" class="panel-footer-link">
-      Learn Three.js
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-      </svg>
+    <p class="panel-footer-heading">Enjoying EZ-Tree? Try my other assets</p>
+    <a href="https://threejsroadmap.com/assets/threejs-water-pro?utm_source=eztree" target="_blank" class="panel-footer-link">
+      🌊 Three.js Water Pro
+    </a>
+    <a href="https://threejsroadmap.com/assets/threejs-sky-pro?utm_source=eztree" target="_blank" class="panel-footer-link">
+      ☁️ Three.js Sky Pro
     </a>
   `;
   panel.appendChild(footer);
@@ -1058,6 +1255,9 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
         try {
           tree.options = JSON.parse(e.target.result);
           tree.generate();
+          if (previewLevel > 0) {
+            applyLODPreview();
+          }
           refreshAllControls();
         } catch (error) {
           console.error('Error parsing JSON:', error);
@@ -1078,20 +1278,26 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     updateInfoDisplays();
   }
 
+  // Initialize the stats overlay with the current tree's counts
+  updateInfoDisplays();
+
   // Mobile expand/collapse functionality
   setupMobileToggle(panel, header);
 }
 
 /**
- * Sets up mobile expand/collapse toggle
+ * Sets up the mobile bottom sheet: the whole header is the tap target,
+ * and the panel starts collapsed so the scene stays the hero.
  */
 function setupMobileToggle(panel, header) {
-  const toggleBtn = header.querySelector('.panel-mobile-toggle');
-  if (!toggleBtn) return;
+  const mobileQuery = window.matchMedia('(max-width: 800px)');
 
-  toggleBtn.addEventListener('click', () => {
+  header.addEventListener('click', () => {
+    if (!mobileQuery.matches) return;
     panel.classList.toggle('collapsed');
-    // Trigger resize event so canvas can adjust
-    window.dispatchEvent(new Event('resize'));
   });
+
+  if (mobileQuery.matches) {
+    panel.classList.add('collapsed');
+  }
 }
