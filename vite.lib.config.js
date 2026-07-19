@@ -1,4 +1,4 @@
-import dts from "vite-plugin-dts";
+import dts from 'vite-plugin-dts';
 
 /**
  * @type {import('vite').UserConfig}
@@ -8,8 +8,8 @@ export default {
     outDir: './build',
     lib: {
       entry: './src/lib/index.js',
-      name: '@dgreenheck/ez-tree',
-      fileName: (format) => `ez-tree.${format}.js`,
+      name: '@pajama-studio/ez-tree-toon',
+      fileName: (format) => `ez-tree-toon.${format}.js`,
     },
     rollupOptions: {
       external: ['three'],
@@ -26,7 +26,7 @@ export default {
       outDir: './build',
       insertTypesEntry: true,
       rollupTypes: true,
-      tsconfigPath: "./tsconfig.json"
+      tsconfigPath: './tsconfig.json',
     }),
   ],
 };

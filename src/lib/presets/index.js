@@ -14,9 +14,11 @@ import pineSmall from './pine_small.json';
 import pineMedium from './pine_medium.json';
 import pineLarge from './pine_large.json';
 import trellis from './trellis.json';
+import hyruleToon from './hyrule_toon.json';
 import TreeOptions from '../options';
 
 export const TreePreset = {
+  'Hyrule Toon': hyruleToon,
   'Ash Small': ashSmall,
   'Ash Medium': ashMedium,
   'Ash Large': ashLarge,
@@ -32,7 +34,7 @@ export const TreePreset = {
   'Pine Small': pineSmall,
   'Pine Medium': pineMedium,
   'Pine Large': pineLarge,
-  'Trellis': trellis,
+  Trellis: trellis,
 };
 
 /**

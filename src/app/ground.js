@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GrassOptions } from './grass';
+import { createSceneToonMaterial } from './toon-scene';
 
 let loaded = false;
 let _grassTexture = null;
@@ -7,7 +8,7 @@ let _dirtTexture = null;
 let _dirtNormal = null;
 
 /**
- * 
+ *
  * @returns {Promise<THREE.Geometry>}
  */
 async function fetchAssets() {
@@ -20,12 +21,16 @@ async function fetchAssets() {
   _grassTexture.wrapT = THREE.RepeatWrapping;
   _grassTexture.colorSpace = THREE.SRGBColorSpace;
 
-  _dirtTexture = await textureLoader.loadAsync('/textures/ground/dirt_color.jpg');
+  _dirtTexture = await textureLoader.loadAsync(
+    '/textures/ground/dirt_color.jpg',
+  );
   _dirtTexture.wrapS = THREE.RepeatWrapping;
   _dirtTexture.wrapT = THREE.RepeatWrapping;
   _dirtTexture.colorSpace = THREE.SRGBColorSpace;
 
-  _dirtNormal = await textureLoader.loadAsync('/textures/ground/dirt_normal.jpg');
+  _dirtNormal = await textureLoader.loadAsync(
+    '/textures/ground/dirt_normal.jpg',
+  );
   _dirtNormal.wrapS = THREE.RepeatWrapping;
   _dirtNormal.wrapT = THREE.RepeatWrapping;
 
@@ -33,7 +38,7 @@ async function fetchAssets() {
 }
 
 export class Ground extends THREE.Mesh {
-  constructor(options = new GrassOptions()) {
+  constructor(options = new GrassOptions(), toonOptions) {
     super();
 
     /**
@@ -43,26 +48,26 @@ export class Ground extends THREE.Mesh {
 
     fetchAssets().then(() => {
       // Ground plane with procedural grass/dirt texture
-      this.material = new THREE.MeshStandardMaterial({
-        emissive: new THREE.Color(0xffffff),
-        emissiveIntensity: 0.01,
-        normalMap: _dirtNormal,
-        metalness: 0.0,
-        roughness: 1.0
-      });
+      this.material = createSceneToonMaterial(
+        {
+          color: new THREE.Color(0xd8ddae),
+          normalMap: _dirtNormal,
+        },
+        toonOptions,
+        (shader) => {
+          shader.uniforms.uNoiseScale = { value: this.options.scale };
+          shader.uniforms.uPatchiness = { value: this.options.patchiness };
+          shader.uniforms.uGrassTexture = { value: _grassTexture };
+          shader.uniforms.uDirtTexture = { value: _dirtTexture };
 
-      this.material.onBeforeCompile = (shader) => {
-        shader.uniforms.uNoiseScale = { value: this.options.scale };
-        shader.uniforms.uPatchiness = { value: this.options.patchiness };
-        shader.uniforms.uGrassTexture = { value: _grassTexture };
-        shader.uniforms.uDirtTexture = { value: _dirtTexture };
-
-        // Add varyings and uniforms to vertex/fragment shaders
-        shader.vertexShader = `
+          // Add varyings and uniforms to vertex/fragment shaders
+          shader.vertexShader =
+            `
           varying vec3 vWorldPosition;
           ` + shader.vertexShader;
 
-        shader.fragmentShader = `
+          shader.fragmentShader =
+            `
           varying vec3 vWorldPosition;
           uniform float uNoiseScale;
           uniform float uPatchiness;
@@ -70,17 +75,17 @@ export class Ground extends THREE.Mesh {
           uniform sampler2D uDirtTexture;
           ` + shader.fragmentShader;
 
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <worldpos_vertex>',
-          `#include <worldpos_vertex>
+          shader.vertexShader = shader.vertexShader.replace(
+            '#include <worldpos_vertex>',
+            `#include <worldpos_vertex>
             vWorldPosition = worldPosition.xyz;
-            `
-        );
+            `,
+          );
 
-        // Add custom shader code for the ground
-        shader.fragmentShader = shader.fragmentShader.replace(
-          `void main() {`,
-          `
+          // Add custom shader code for the ground
+          shader.fragmentShader = shader.fragmentShader.replace(
+            `void main() {`,
+            `
           vec3 mod289(vec3 x) {
             return x - floor(x * (1.0 / 289.0)) * 289.0;
           }
@@ -123,11 +128,11 @@ export class Ground extends THREE.Mesh {
           }
           
           void main() {`,
-        );
+          );
 
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <map_fragment>',
-          `
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <map_fragment>',
+            `
           vec2 uv = vec2(vWorldPosition.x, vWorldPosition.z);
           vec3 grassColor = texture2D(uGrassTexture, uv / 30.0).rgb;
           vec3 dirtColor = texture2D(uDirtTexture, uv / 30.0).rgb;
@@ -139,21 +144,22 @@ export class Ground extends THREE.Mesh {
           // Blend between grass and dirt based on the noise value
           vec4 sampledDiffuseColor = vec4(mix(grassColor, dirtColor, s), 1.0);
           diffuseColor *= sampledDiffuseColor;
-          `
-        );
+          `,
+          );
 
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <normal_fragment_maps>',
-          `
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <normal_fragment_maps>',
+            `
           vec3 mapN = texture2D( normalMap, uv / 30.0 ).xyz * 2.0 - 1.0;
           mapN.xy *= normalScale;
 
           normal = normalize( tbn * mapN );
-          `
-        );
+          `,
+          );
 
-        this.material.userData.shader = shader;
-      };
+          this.material.userData.shader = shader;
+        },
+      );
 
       this.geometry = new THREE.PlaneGeometry(2000, 2000);
       this.rotation.x = -Math.PI / 2;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/Addons.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { toonifyMaterial } from './toon-scene';
 
 let loaded = false;
 let _rock1Mesh = null;
@@ -8,7 +9,7 @@ let _rock2Mesh = null;
 let _rock3Mesh = null;
 
 /**
- * 
+ *
  * @returns {Promise<THREE.Geometry>}
  */
 async function fetchAssets() {
@@ -17,19 +18,24 @@ async function fetchAssets() {
   const gltfLoader = new GLTFLoader();
 
   const dracoLoader = new DRACOLoader();
-  dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+  dracoLoader.setDecoderPath(
+    'https://www.gstatic.com/draco/versioned/decoders/1.5.7/',
+  );
   gltfLoader.setDRACOLoader(dracoLoader);
 
-  _rock1Mesh = (await gltfLoader.loadAsync('/models/rock1.glb')).scene.children[0];
-  _rock2Mesh = (await gltfLoader.loadAsync('/models/rock2.glb')).scene.children[0];
-  _rock3Mesh = (await gltfLoader.loadAsync('/models/rock3.glb')).scene.children[0];
+  _rock1Mesh = (await gltfLoader.loadAsync('/models/rock1.glb')).scene
+    .children[0];
+  _rock2Mesh = (await gltfLoader.loadAsync('/models/rock2.glb')).scene
+    .children[0];
+  _rock3Mesh = (await gltfLoader.loadAsync('/models/rock3.glb')).scene
+    .children[0];
 
   loaded = true;
 }
 
 export class RockOptions {
   /**
-   * Scale factor 
+   * Scale factor
    */
   size = { x: 2, y: 2, z: 2 };
 
@@ -40,13 +46,14 @@ export class RockOptions {
 }
 
 export class Rocks extends THREE.Group {
-  constructor(options = new RockOptions()) {
+  constructor(options = new RockOptions(), toonOptions) {
     super();
 
     /**
      * @type {RockOptions}
      */
     this.options = options;
+    this.toonOptions = toonOptions;
 
     fetchAssets().then(() => {
       this.add(this.generateInstances(_rock1Mesh));
@@ -56,7 +63,10 @@ export class Rocks extends THREE.Group {
   }
 
   generateInstances(mesh) {
-    const instancedMesh = new THREE.InstancedMesh(mesh.geometry, mesh.material, 200);
+    const material = toonifyMaterial(mesh.material, this.toonOptions, {
+      color: new THREE.Color(0x84908a),
+    });
+    const instancedMesh = new THREE.InstancedMesh(mesh.geometry, material, 200);
 
     const dummy = new THREE.Object3D();
 
@@ -66,23 +76,19 @@ export class Rocks extends THREE.Group {
       const p = new THREE.Vector3(
         2 * (Math.random() - 0.5) * 250,
         0.3,
-        2 * (Math.random() - 0.5) * 250
+        2 * (Math.random() - 0.5) * 250,
       );
 
       dummy.position.copy(p);
 
       // Set rotation randomly
-      dummy.rotation.set(
-        0,
-        2 * Math.PI * Math.random(),
-        0
-      );
+      dummy.rotation.set(0, 2 * Math.PI * Math.random(), 0);
 
       // Set scale randomly
       dummy.scale.set(
         this.options.sizeVariation.x * Math.random() + this.options.size.x,
         this.options.sizeVariation.y * Math.random() + this.options.size.y,
-        this.options.sizeVariation.z * Math.random() + this.options.size.z
+        this.options.sizeVariation.z * Math.random() + this.options.size.z,
       );
 
       // Apply the transformation to the instance

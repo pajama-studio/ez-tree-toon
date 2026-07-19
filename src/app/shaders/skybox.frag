@@ -8,6 +8,7 @@ uniform vec3 uSunColor;
 uniform vec3 uSkyColorLow;
 uniform vec3 uSkyColorHigh;
 uniform float uSunSize;
+uniform float uSkySteps;
 
 void main() {
     // Convert angles from degrees to radians
@@ -26,10 +27,12 @@ void main() {
 
     // Gradient for the sky (simple blue gradient)
     float t = direction.y * 0.5 + 0.5;
+    t = floor(t * uSkySteps) / max(uSkySteps - 1.0, 1.0);
     vec3 skyColor = mix(uSkyColorLow, uSkyColorHigh, t);
 
     // Compute sun appearance
-    float sunIntensity = pow(max(dot(direction, sunDirection), 0.0), 1000.0 / uSunSize);
+    float sunDisc = pow(max(dot(direction, sunDirection), 0.0), 1000.0 / uSunSize);
+    float sunIntensity = step(0.45, sunDisc);
     vec3 sunColor = uSunColor * sunIntensity;
 
     // Combine sun and sky color

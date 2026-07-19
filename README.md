@@ -1,142 +1,114 @@
-# EZ-Tree
+# EZ Tree Toon
 
-![NPM Version](https://img.shields.io/npm/v/%40dgreenheck%2Fez-tree)
-![NPM Downloads](https://img.shields.io/npm/dw/%40dgreenheck%2Fez-tree)
-![GitHub Repo stars](https://img.shields.io/github/stars/dgreenheck/ez-tree)
-![X (formerly Twitter) Follow](https://img.shields.io/twitter/follow/dangreenheck)
-![YouTube Channel Subscribers](https://img.shields.io/youtube/channel/subscribers/UCrdx_EU_Wx8_uBfqO0cI-9Q)
+EZ Tree Toon is Pajama Studio's toon-focused adaptation of Daniel Greenheck's [EZ-Tree](https://github.com/dgreenheck/ez-tree). It keeps the procedural tree generator, presets, wind animation, LODs, PNG export and GLB export, and adds a complete Three.js cel-rendering workflow.
 
-<p align="center">
-<img src="https://github.com/user-attachments/assets/cb5f5edd-3e1b-453d-925f-734965126b17">
-</p>
+The editor now uses one shared toon art direction across trees, grass, flowers, rocks, ground, sky, fog and lighting. Stylized normals are written into each `BufferGeometry`, so exported GLBs carry the authored normals instead of depending on an editor-only shader.
 
-# About
-EZ-Tree is a procedural tree generator with dozens of tunable parameters. The standalone tree generation code is published as a library and can be imported into your own application for dynamically generating trees on demand. Additionally, there is a standalone web app which allows you to create trees within the browser and export as .PNG or .GLB files.
+## Features
 
-# App
-https://eztree.dev
+- `THREE.MeshToonMaterial` lighting with editable 2–8 step ramps
+- Export-safe object-space vertex-normal baking
+- Surface, rounded-canopy, faceted and upright normal modes
+- Optional spherical normal quantization for deliberately chunky shading
+- Adjustable rim light, ink outline, key light and hemisphere fill
+- Posterized sky, sun and clouds
+- Built-in `Hyrule Toon` preset with clustered foliage normals and painterly bark
+- Wind animation on toon leaves, grass and flowers
+- Full-detail and zipped LOD GLB export with toon metadata in glTF `extras`
+- Transparent PNG export using the toon post-processing stack
 
-# Installation
-
-```js
-npm i @dgreenheck/ez-tree
-```
-
-# Usage
-
-```js
-// Create new instance
-const tree = new Tree();
-
-// Set parameters
-tree.options.seed = 12345;
-tree.options.trunk.length = 20;
-tree.options.branch.levels = 3;
-
-// Generate tree and add to your Three.js scene
-tree.generate();
-scene.add(tree);
-```
-
-Any time the tree parameters are changed, you must call `generate()` to regenerate the geometry.
-
-## Levels of Detail (LODs)
-
-For scenes with many trees, `generateLODs()` builds the tree at multiple levels of detail hosted in a `THREE.LOD` object inside the tree group. The renderer automatically switches levels based on camera distance. All levels are meshed from the same skeleton, so the tree's silhouette stays consistent across switches — distant levels just use fewer ring segments and fewer (but larger) leaves.
-
-```js
-const tree = new Tree();
-tree.loadPreset('Ash Medium');
-tree.generateLODs(); // instead of generate()
-scene.add(tree);
-```
-
-The default levels (`Tree.defaultLODLevels`) switch at 100 and 250 units, reducing to roughly 40% and 20% of the full triangle count. You can pass custom levels:
-
-```js
-tree.generateLODs([
-  { distance: 0, detail: {} }, // full detail
-  {
-    distance: 80,
-    hysteresis: 0.05,
-    detail: {
-      sectionStride: 3,    // sample every 3rd ring along each branch
-      segmentFactor: 0.75, // reduce radial segments to 75% (min 3)
-      leafStride: 2,       // keep every 2nd leaf...
-      leafScale: 1.4,      // ...enlarged to preserve canopy coverage
-      billboard: 'single', // drop the second crossed leaf quad
-    },
-  },
-]);
-```
-
-All LOD levels share one bark material and one leaf material, so `tree.update(time)` animates wind at every level. Calling `generate()` afterwards tears the LOD down and restores the single full-detail mesh pair (note that exporting a tree generated with `generateLODs()` to GLB will include every level).
-
-If you have your own LOD or instancing system, `tree.createGeometry(detail)` returns raw `{ branches, leaves }` `BufferGeometry` pairs at any detail level without touching the tree's own meshes.
-
-# Running Standalone App Locally
-
-To run the standalone app locally, you first need to build the EZ-Tree library before running the app.
+## Run the editor
 
 ```bash
 npm install
-npm run app
+npm run dev
 ```
 
-# Running App with Docker
+Open `http://localhost:5173`. For a production build:
 
 ```bash
-docker compose build
-docker compose up -d
+npm run build:lib
+npm run build:app
 ```
 
-# Tree Parameters
+## Library usage
 
-The `TreeOptions` class defines an options object that controls various parameters of a procedurally generated tree. Each property of this object allows for customization of the tree's appearance, including bark, branches, and leaves. Below is a detailed explanation of each property of the `TreeOptions` object.
+```js
+import * as THREE from 'three';
+import {
+  Tree,
+  ToonNormalMode,
+  bakeToonNormals,
+  createToonGradientMap,
+} from '@pajama-studio/ez-tree-toon';
 
-## General Properties
+const tree = new Tree();
+tree.loadPreset('Ash Medium');
+tree.options.toon.steps = 4;
+tree.options.toon.normalMode = ToonNormalMode.Rounded;
+tree.options.toon.normalBlend = 0.55;
+tree.options.toon.normalQuantization = 0;
+tree.generate();
+scene.add(tree);
 
-- **`seed`**: Sets the initial value for random generation, ensuring consistent tree generation when using the same seed.
-- **`type`**: Defines the type of the tree, which can be set to one of the options from the `TreeType` enumeration (e.g., `TreeType.Deciduous`).
+// The normal baker also works on arbitrary BufferGeometry.
+const bakedGeometry = bakeToonNormals(sourceGeometry, {
+  mode: ToonNormalMode.Faceted,
+  quantization: 5,
+});
 
-## Bark Parameters
+const gradientMap = createToonGradientMap(4, 0.16);
+const material = new THREE.MeshToonMaterial({ gradientMap });
+```
 
-The `bark` object controls the appearance and properties of the tree trunk.
+`bakeToonNormals()` returns the input geometry except in faceted mode, where an indexed geometry is converted to a non-indexed replacement so every triangle can own a true face normal. Always use the returned value.
 
-- **`type`**: Specifies the type of bark texture to use, selected from the `BarkType` enumeration (e.g., `BarkType.Oak`).
-- **`tint`**: Determines the color tint applied to the bark, defined as a hexadecimal color value (e.g., `0xffffff` for white).
-- **`flatShading`**: Boolean property indicating whether to use flat shading (`true`) or smooth shading (`false`) for the bark.
-- **`textured`**: Boolean value that indicates if a texture is applied to the bark (`true` or `false`).
-- **`textureScale`**: Controls the scale of the bark texture in both the `x` and `y` axes. It is an object with properties `x` and `y` to define the scaling factors.
+## Toon options
 
-## Branch Parameters
+`tree.options.toon` is serializable with a tree preset:
 
-The `branch` object defines parameters for the trunk and branch levels of the tree.
+```js
+{
+  enabled: true,
+  steps: 4,
+  shadowLift: 0.25,
+  normalMode: 'rounded',
+  normalBlend: 0.78,
+  normalQuantization: 0,
+  rimStrength: 0.08,
+  rimPower: 3,
+  rimColor: 0xfff2c7,
+  barkColor: 0x8a5f3d,
+  leafColor: 0x68a34b,
+  leafVariation: 0.16,
+  useBarkTextures: false,
+  useLeafTextureColor: false,
+}
+```
 
-- **`levels`**: Number of recursive branch levels. Setting this to `0` creates only the trunk, while higher values add more branches.
-- **`angle`**: Defines the angle, in degrees, at which child branches grow relative to their parent branch. This is specified separately for each level.
-- **`children`**: Specifies the number of child branches at each level, with the index (`0`, `1`, `2`, etc.) representing the level.
-- **`force`**: Represents an external directional force encouraging tree growth, defined by `direction` (a vector object `{ x, y, z }`) and `strength` (a numeric value).
-- **`gnarliness`**: Defines how twisted or curled each branch level should be, specified for each level.
-- **`length`**: Length of the branches at each level. This is an object with keys representing each level.
-- **`radius`**: Radius (or thickness) of the branches at each level.
-- **`sections`**: Number of segments along the length of each branch level, controlling the resolution of the branch mesh.
-- **`segments`**: Number of radial segments that make up each branch, with a higher value resulting in a smoother cylinder.
-- **`start`**: Specifies where along the parent branch (as a fraction from `0` to `1`) the child branches should start forming.
-- **`taper`**: Controls the tapering of the branches at each level. A value between `0` and `1` defines the reduction in radius from base to tip.
-- **`twist`**: Defines the amount of twisting applied to each branch level.
+The standalone editor adds scene-only outline and lighting values to the same JSON block. GLB exports include the current configuration as `toonShading` metadata and include per-mesh `toonNormalBake` metadata.
 
-## Leaf Parameters
+## LODs
 
-The `leaves` object defines properties that control the appearance and placement of leaves.
+The original LOD workflow remains available. Every generated level receives the same toon material and its own baked normal attributes:
 
-- **`type`**: Specifies the type of leaf texture, selected from the `LeafType` enumeration (e.g., `LeafType.Oak`).
-- **`billboard`**: Defines how leaves are rendered. The `Billboard` enumeration can be set to `Single` or `Double` to indicate single or perpendicular double-sided leaves.
-- **`angle`**: Defines the angle of the leaves relative to the parent branch, in degrees.
-- **`count`**: Number of leaves to generate.
-- **`start`**: Specifies where along the length of the branch (as a value between `0` and `1`) leaves should start growing.
-- **`size`**: Size of the leaves, represented as a numeric value.
-- **`sizeVariance`**: Specifies how much variance in size each leaf instance should have, making the leaves look more natural.
-- **`tint`**: Tint color applied to the leaves, defined as a hexadecimal color value (e.g., `0xffffff` for white).
-- **`alphaTest`**: Sets the alpha threshold for leaf transparency, controlling the transparency of the leaf textures.
+```js
+const tree = new Tree();
+tree.loadPreset('Oak Large');
+tree.generateLODs();
+scene.add(tree);
+```
 
+## Tests
+
+```bash
+npm test
+```
+
+The checks cover toon gradient construction, normalized baked normals, faceted topology preservation and tree material integration.
+
+## Credits and license
+
+The procedural generator and original application are by Daniel Greenheck. The toon material system, normal baker, cel scene, toon controls and toon export metadata are the Pajama Studio adaptation.
+
+This project retains the original MIT license. Texture-specific attribution remains in `src/app/public/textures/LICENSE.md`.

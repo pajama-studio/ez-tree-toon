@@ -1,27 +1,30 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Tree, TreePreset } from '@dgreenheck/ez-tree';
+import { Tree, TreePreset } from '@pajama-studio/ez-tree-toon';
 import { Environment } from './environment';
 import { loadPresetWithTextures } from './textures';
+import { createSceneToonOptions } from './toon-scene';
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function paintUI() {
-  return new Promise(resolve => requestAnimationFrame(resolve));
+  return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
 /**
  * Creates a new instance of the Three.js scene
- * @param {THREE.WebGLRenderer} renderer 
- * @returns 
+ * @param {THREE.WebGLRenderer} renderer
+ * @returns
  */
 export async function createScene(renderer) {
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x94b9f8, 0.0015);
+  scene.background = new THREE.Color(0x88b9de);
+  scene.fog = new THREE.FogExp2(0x9bc5dc, 0.0018);
 
-  const environment = new Environment();
+  const toonStyle = createSceneToonOptions();
+  const environment = new Environment(toonStyle);
   scene.add(environment);
 
   const camera = new THREE.PerspectiveCamera(
@@ -43,7 +46,8 @@ export async function createScene(renderer) {
   controls.update();
 
   const tree = new Tree();
-  loadPresetWithTextures(tree, 'Ash Medium');
+  tree.options.toon = toonStyle;
+  loadPresetWithTextures(tree, 'Hyrule Toon');
   tree.castShadow = true;
   tree.receiveShadow = true;
   scene.add(tree);
@@ -69,6 +73,7 @@ export async function createScene(renderer) {
     const index = Math.floor(Math.random() * presets.length);
 
     const t = new Tree();
+    t.options.toon = toonStyle;
     t.position.set(r * Math.cos(theta), 0, r * Math.sin(theta));
     loadPresetWithTextures(t, presets[index], false);
     t.options.seed = 10000 * Math.random();
@@ -83,7 +88,7 @@ export async function createScene(renderer) {
     while (i < treeCount) {
       createTree();
 
-      const progress = Math.floor(100 * (i + 1) / treeCount);
+      const progress = Math.floor((100 * (i + 1)) / treeCount);
 
       // Update progress UI
       logoElement.style.clipPath = `inset(${100 - progress}% 0% 0% 0%)`;
@@ -111,6 +116,7 @@ export async function createScene(renderer) {
     environment,
     tree,
     camera,
-    controls
-  }
+    controls,
+    toonStyle,
+  };
 }

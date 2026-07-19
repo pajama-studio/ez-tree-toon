@@ -1,11 +1,23 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { zipSync } from 'three/addons/libs/fflate.module.js';
-import { Billboard, TreePreset, Tree, TreeType } from '@dgreenheck/ez-tree';
-import { BarkType, LeafType, applyTreeTextures, loadPresetWithTextures } from './textures';
+import {
+  Billboard,
+  ToonNormalMode,
+  TreePreset,
+  Tree,
+  TreeType,
+} from '@pajama-studio/ez-tree-toon';
+import {
+  BarkType,
+  LeafType,
+  applyTreeTextures,
+  loadPresetWithTextures,
+} from './textures';
 import { Environment } from './environment';
-import { OrbitControls } from 'three/examples/jsm/Addons.js';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { version } from '../../package.json';
+import { refreshSceneToonMaterials } from './toon-scene';
 
 const exporter = new GLTFExporter();
 
@@ -166,7 +178,7 @@ function createSlider(label, value, min, max, step, onChange) {
       slider.value = v;
       valueInput.value = formatValue(v, step);
       setFill();
-    }
+    },
   };
 }
 
@@ -192,7 +204,8 @@ function createColorPicker(label, value, onChange) {
 
   const colorPreview = document.createElement('div');
   colorPreview.className = 'color-preview';
-  colorPreview.style.backgroundColor = '#' + value.toString(16).padStart(6, '0');
+  colorPreview.style.backgroundColor =
+    '#' + value.toString(16).padStart(6, '0');
 
   const picker = document.createElement('input');
   picker.type = 'color';
@@ -216,7 +229,7 @@ function createColorPicker(label, value, onChange) {
       const hexStr = '#' + v.toString(16).padStart(6, '0');
       picker.value = hexStr;
       colorPreview.style.backgroundColor = hexStr;
-    }
+    },
   };
 }
 
@@ -255,7 +268,9 @@ function createSelect(label, options, value, onChange) {
 
   return {
     element: container,
-    setValue: (v) => { select.value = v; }
+    setValue: (v) => {
+      select.value = v;
+    },
   };
 }
 
@@ -291,7 +306,7 @@ function createToggle(label, value, onChange) {
     element: container,
     setValue: (v) => {
       toggle.classList.toggle('active', v);
-    }
+    },
   };
 }
 
@@ -361,7 +376,9 @@ function createDisplay(label, value, formatter = (v) => v) {
 
   return {
     element: container,
-    setValue: (v) => { valueEl.textContent = formatter(v); }
+    setValue: (v) => {
+      valueEl.textContent = formatter(v);
+    },
   };
 }
 
@@ -398,7 +415,7 @@ function createSection(title, iconKey, expanded = false) {
     element: section,
     content: content,
     add: (control) => content.appendChild(control.element || control),
-    setExpanded: (exp) => section.classList.toggle('expanded', exp)
+    setExpanded: (exp) => section.classList.toggle('expanded', exp),
   };
 }
 
@@ -434,7 +451,7 @@ function createSubSection(title, expanded = false) {
   return {
     element: section,
     content: content,
-    add: (control) => content.appendChild(control.element || control)
+    add: (control) => content.appendChild(control.element || control),
   };
 }
 
@@ -453,11 +470,22 @@ let controls = [];
  * @param {THREE.Camera} camera
  * @param {OrbitControls} orbitControls
  * @param {String} initialPreset
+ * @param {{toonStyle: object, outlinePass: import('three/examples/jsm/postprocessing/OutlinePass.js').OutlinePass}} toonRuntime
  */
-export function setupUI(tree, environment, renderer, scene, camera, orbitControls, initialPreset) {
+export function setupUI(
+  tree,
+  environment,
+  renderer,
+  scene,
+  camera,
+  orbitControls,
+  initialPreset,
+  toonRuntime,
+) {
   const container = document.getElementById('ui-container');
   container.innerHTML = '';
   controls = [];
+  const toonStyle = toonRuntime?.toonStyle ?? tree.options.toon;
 
   // Create main panel
   const panel = document.createElement('div');
@@ -472,8 +500,8 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     <button class="panel-mobile-toggle" aria-label="Toggle panel">
       ${icons.chevronUp}
     </button>
-    <h1 class="panel-title">EZ Tree</h1>
-    <p class="panel-subtitle">Procedural Tree Generator</p>
+    <h1 class="panel-title">EZ Tree Toon</h1>
+    <p class="panel-subtitle">Toon Tree & Normal Baker</p>
   `;
   panel.appendChild(header);
 
@@ -498,11 +526,13 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   scrollArea.appendChild(tabNav);
 
   const tabButtons = tabNav.querySelectorAll('.tab-button');
-  tabButtons.forEach(btn => {
+  tabButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
-      tabButtons.forEach(b => b.classList.remove('active'));
+      tabButtons.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+      document
+        .querySelectorAll('.tab-content')
+        .forEach((tc) => tc.classList.remove('active'));
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
     });
   });
@@ -566,9 +596,10 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     const btn = document.createElement('button');
     btn.className = 'lod-button' + (i === 0 ? ' active' : '');
     btn.textContent = i === 0 ? 'Full' : `LOD${i}`;
-    btn.title = i === 0
-      ? 'Full detail'
-      : `Preview detail level ${i} (switches at ${level.distance} units)`;
+    btn.title =
+      i === 0
+        ? 'Full detail'
+        : `Preview detail level ${i} (switches at ${level.distance} units)`;
     btn.addEventListener('click', () => setPreviewLevel(i));
     lodSwitcher.appendChild(btn);
     return btn;
@@ -596,9 +627,15 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   function displayedCounts() {
     const gb = tree.branchesMesh.geometry;
     const gl = tree.leavesMesh.geometry;
+    const triangleCount = (geometry) =>
+      geometry.index
+        ? geometry.index.count / 3
+        : (geometry.attributes.position?.count ?? 0) / 3;
     return {
-      vertices: (gb.attributes.position?.count ?? 0) + (gl.attributes.position?.count ?? 0),
-      triangles: ((gb.index?.count ?? 0) + (gl.index?.count ?? 0)) / 3,
+      vertices:
+        (gb.attributes.position?.count ?? 0) +
+        (gl.attributes.position?.count ?? 0),
+      triangles: triangleCount(gb) + triangleCount(gl),
     };
   }
 
@@ -626,8 +663,9 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   // ----- Presets Section -----
   const presetsSection = createSection('Presets', 'swatch', true);
 
-  const presetSelect = createSelect('Preset',
-    Object.fromEntries(Object.keys(TreePreset).map(p => [p, p])),
+  const presetSelect = createSelect(
+    'Preset',
+    Object.fromEntries(Object.keys(TreePreset).map((p) => [p, p])),
     initialPreset,
     (val) => {
       loadPresetWithTextures(tree, val);
@@ -635,17 +673,27 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
         applyLODPreview();
       }
       refreshAllControls();
-    }
+    },
   );
   presetsSection.add(presetSelect);
   controls.push({ control: presetSelect, update: () => {} });
 
-  const seedSlider = createSlider('Seed', tree.options.seed, 0, 65536, 1, (val) => {
-    tree.options.seed = val;
-    onChange();
-  });
+  const seedSlider = createSlider(
+    'Seed',
+    tree.options.seed,
+    0,
+    65536,
+    1,
+    (val) => {
+      tree.options.seed = val;
+      onChange();
+    },
+  );
   presetsSection.add(seedSlider);
-  controls.push({ control: seedSlider, update: () => seedSlider.setValue(tree.options.seed) });
+  controls.push({
+    control: seedSlider,
+    update: () => seedSlider.setValue(tree.options.seed),
+  });
 
   const randomSeedBtn = createButton('Random Seed', 'dice', () => {
     tree.options.seed = Math.floor(Math.random() * 65536);
@@ -656,206 +704,662 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
 
   parametersTab.appendChild(presetsSection.element);
 
+  // ----- Toon Studio Section -----
+  const toonSection = createSection('Toon Studio', 'sparkles', true);
+
+  const refreshToonLook = (rebuildNormals = false) => {
+    if (rebuildNormals) onChange();
+    refreshSceneToonMaterials(scene, toonStyle);
+    environment.skybox.setToonSteps(toonStyle.steps);
+    environment.skybox.sun.intensity = toonStyle.keyLightIntensity;
+    environment.skybox.fill.intensity = toonStyle.fillLightIntensity;
+
+    if (toonRuntime?.outlinePass) {
+      const outline = toonRuntime.outlinePass;
+      outline.enabled = toonStyle.outlineEnabled;
+      outline.edgeThickness = toonStyle.outlineThickness;
+      outline.edgeStrength = toonStyle.outlineStrength;
+      outline.visibleEdgeColor.set(toonStyle.outlineColor);
+      outline.hiddenEdgeColor.set(toonStyle.outlineColor);
+    }
+  };
+
+  const bandSlider = createSlider(
+    'Light Bands',
+    toonStyle.steps,
+    2,
+    8,
+    1,
+    (val) => {
+      toonStyle.steps = val;
+      refreshToonLook(true);
+    },
+  );
+  toonSection.add(bandSlider);
+  controls.push({
+    control: bandSlider,
+    update: () => bandSlider.setValue(toonStyle.steps),
+  });
+
+  const shadowLiftSlider = createSlider(
+    'Shadow Lift',
+    toonStyle.shadowLift,
+    0,
+    0.6,
+    0.01,
+    (val) => {
+      toonStyle.shadowLift = val;
+      refreshToonLook(true);
+    },
+  );
+  toonSection.add(shadowLiftSlider);
+  controls.push({
+    control: shadowLiftSlider,
+    update: () => shadowLiftSlider.setValue(toonStyle.shadowLift),
+  });
+
+  const toonBarkColorPicker = createColorPicker(
+    'Toon Bark',
+    toonStyle.barkColor,
+    (val) => {
+      toonStyle.barkColor = val;
+      refreshToonLook(true);
+    },
+  );
+  toonSection.add(toonBarkColorPicker);
+  controls.push({
+    control: toonBarkColorPicker,
+    update: () => toonBarkColorPicker.setValue(toonStyle.barkColor),
+  });
+
+  const toonLeafColorPicker = createColorPicker(
+    'Toon Leaves',
+    toonStyle.leafColor,
+    (val) => {
+      toonStyle.leafColor = val;
+      refreshToonLook(true);
+    },
+  );
+  toonSection.add(toonLeafColorPicker);
+  controls.push({
+    control: toonLeafColorPicker,
+    update: () => toonLeafColorPicker.setValue(toonStyle.leafColor),
+  });
+
+  const leafVariationSlider = createSlider(
+    'Leaf Variation',
+    toonStyle.leafVariation,
+    0,
+    0.5,
+    0.01,
+    (val) => {
+      toonStyle.leafVariation = val;
+      refreshToonLook(true);
+    },
+  );
+  toonSection.add(leafVariationSlider);
+  controls.push({
+    control: leafVariationSlider,
+    update: () => leafVariationSlider.setValue(toonStyle.leafVariation),
+  });
+
+  const normalModeSelect = createSelect(
+    'Baked Normals',
+    {
+      Surface: ToonNormalMode.Surface,
+      'Rounded Canopy': ToonNormalMode.Rounded,
+      Faceted: ToonNormalMode.Faceted,
+      Upright: ToonNormalMode.Upright,
+    },
+    toonStyle.normalMode,
+    (val) => {
+      toonStyle.normalMode = val;
+      refreshToonLook(true);
+    },
+  );
+  toonSection.add(normalModeSelect);
+  controls.push({
+    control: normalModeSelect,
+    update: () => normalModeSelect.setValue(toonStyle.normalMode),
+  });
+
+  const normalBlendSlider = createSlider(
+    'Normal Blend',
+    toonStyle.normalBlend,
+    0,
+    1,
+    0.01,
+    (val) => {
+      toonStyle.normalBlend = val;
+      refreshToonLook(true);
+    },
+  );
+  toonSection.add(normalBlendSlider);
+  controls.push({
+    control: normalBlendSlider,
+    update: () => normalBlendSlider.setValue(toonStyle.normalBlend),
+  });
+
+  const normalStepsSlider = createSlider(
+    'Normal Quantize',
+    toonStyle.normalQuantization,
+    0,
+    12,
+    1,
+    (val) => {
+      toonStyle.normalQuantization = val;
+      refreshToonLook(true);
+    },
+  );
+  toonSection.add(normalStepsSlider);
+  controls.push({
+    control: normalStepsSlider,
+    update: () => normalStepsSlider.setValue(toonStyle.normalQuantization),
+  });
+
+  const rimStrengthSlider = createSlider(
+    'Rim Strength',
+    toonStyle.rimStrength,
+    0,
+    1,
+    0.01,
+    (val) => {
+      toonStyle.rimStrength = val;
+      refreshToonLook();
+    },
+  );
+  toonSection.add(rimStrengthSlider);
+  controls.push({
+    control: rimStrengthSlider,
+    update: () => rimStrengthSlider.setValue(toonStyle.rimStrength),
+  });
+
+  const rimPowerSlider = createSlider(
+    'Rim Falloff',
+    toonStyle.rimPower,
+    0.5,
+    8,
+    0.1,
+    (val) => {
+      toonStyle.rimPower = val;
+      refreshToonLook();
+    },
+  );
+  toonSection.add(rimPowerSlider);
+  controls.push({
+    control: rimPowerSlider,
+    update: () => rimPowerSlider.setValue(toonStyle.rimPower),
+  });
+
+  const rimColorPicker = createColorPicker(
+    'Rim Color',
+    toonStyle.rimColor,
+    (val) => {
+      toonStyle.rimColor = val;
+      refreshToonLook();
+    },
+  );
+  toonSection.add(rimColorPicker);
+  controls.push({
+    control: rimColorPicker,
+    update: () => rimColorPicker.setValue(toonStyle.rimColor),
+  });
+
+  const outlineToggle = createToggle(
+    'Ink Outline',
+    toonStyle.outlineEnabled,
+    (val) => {
+      toonStyle.outlineEnabled = val;
+      refreshToonLook();
+    },
+  );
+  toonSection.add(outlineToggle);
+  controls.push({
+    control: outlineToggle,
+    update: () => outlineToggle.setValue(toonStyle.outlineEnabled),
+  });
+
+  const outlineWidthSlider = createSlider(
+    'Outline Width',
+    toonStyle.outlineThickness,
+    0.1,
+    4,
+    0.1,
+    (val) => {
+      toonStyle.outlineThickness = val;
+      refreshToonLook();
+    },
+  );
+  toonSection.add(outlineWidthSlider);
+  controls.push({
+    control: outlineWidthSlider,
+    update: () => outlineWidthSlider.setValue(toonStyle.outlineThickness),
+  });
+
+  const outlineStrengthSlider = createSlider(
+    'Outline Strength',
+    toonStyle.outlineStrength,
+    0,
+    8,
+    0.1,
+    (val) => {
+      toonStyle.outlineStrength = val;
+      refreshToonLook();
+    },
+  );
+  toonSection.add(outlineStrengthSlider);
+  controls.push({
+    control: outlineStrengthSlider,
+    update: () => outlineStrengthSlider.setValue(toonStyle.outlineStrength),
+  });
+
+  const outlineColorPicker = createColorPicker(
+    'Outline Color',
+    toonStyle.outlineColor,
+    (val) => {
+      toonStyle.outlineColor = val;
+      refreshToonLook();
+    },
+  );
+  toonSection.add(outlineColorPicker);
+  controls.push({
+    control: outlineColorPicker,
+    update: () => outlineColorPicker.setValue(toonStyle.outlineColor),
+  });
+
+  parametersTab.appendChild(toonSection.element);
+
   // ----- Bark Section -----
   const barkSection = createSection('Bark', 'cube', false);
 
-  const barkTypeSelect = createSelect('Type', BarkType, tree.options.bark.type, (val) => {
-    tree.options.bark.type = val;
-    onChange();
-  });
+  const barkTypeSelect = createSelect(
+    'Type',
+    BarkType,
+    tree.options.bark.type,
+    (val) => {
+      tree.options.bark.type = val;
+      onChange();
+    },
+  );
   barkSection.add(barkTypeSelect);
-  controls.push({ control: barkTypeSelect, update: () => barkTypeSelect.setValue(tree.options.bark.type) });
-
-  const barkTintPicker = createColorPicker('Tint', tree.options.bark.tint, (val) => {
-    tree.options.bark.tint = val;
-    onChange();
+  controls.push({
+    control: barkTypeSelect,
+    update: () => barkTypeSelect.setValue(tree.options.bark.type),
   });
+
+  const barkTintPicker = createColorPicker(
+    'Tint',
+    tree.options.bark.tint,
+    (val) => {
+      tree.options.bark.tint = val;
+      onChange();
+    },
+  );
   barkSection.add(barkTintPicker);
-  controls.push({ control: barkTintPicker, update: () => barkTintPicker.setValue(tree.options.bark.tint) });
-
-  const flatShadingToggle = createToggle('Flat Shading', tree.options.bark.flatShading, (val) => {
-    tree.options.bark.flatShading = val;
-    onChange();
+  controls.push({
+    control: barkTintPicker,
+    update: () => barkTintPicker.setValue(tree.options.bark.tint),
   });
+
+  const flatShadingToggle = createToggle(
+    'Flat Shading',
+    tree.options.bark.flatShading,
+    (val) => {
+      tree.options.bark.flatShading = val;
+      onChange();
+    },
+  );
   barkSection.add(flatShadingToggle);
-  controls.push({ control: flatShadingToggle, update: () => flatShadingToggle.setValue(tree.options.bark.flatShading) });
-
-  const texturedToggle = createToggle('Textured', tree.options.bark.textured, (val) => {
-    tree.options.bark.textured = val;
-    onChange();
+  controls.push({
+    control: flatShadingToggle,
+    update: () => flatShadingToggle.setValue(tree.options.bark.flatShading),
   });
+
+  const texturedToggle = createToggle(
+    'Textured',
+    tree.options.bark.textured,
+    (val) => {
+      tree.options.bark.textured = val;
+      onChange();
+    },
+  );
   barkSection.add(texturedToggle);
-  controls.push({ control: texturedToggle, update: () => texturedToggle.setValue(tree.options.bark.textured) });
-
-  const texScaleXSlider = createSlider('Texture Scale X', tree.options.bark.textureScale.x, 0.5, 5, 0.1, (val) => {
-    tree.options.bark.textureScale.x = val;
-    onChange();
+  controls.push({
+    control: texturedToggle,
+    update: () => texturedToggle.setValue(tree.options.bark.textured),
   });
+
+  const texScaleXSlider = createSlider(
+    'Texture Scale X',
+    tree.options.bark.textureScale.x,
+    0.5,
+    5,
+    0.1,
+    (val) => {
+      tree.options.bark.textureScale.x = val;
+      onChange();
+    },
+  );
   barkSection.add(texScaleXSlider);
-  controls.push({ control: texScaleXSlider, update: () => texScaleXSlider.setValue(tree.options.bark.textureScale.x) });
-
-  const texScaleYSlider = createSlider('Texture Scale Y', tree.options.bark.textureScale.y, 0.5, 5, 0.1, (val) => {
-    tree.options.bark.textureScale.y = val;
-    onChange();
+  controls.push({
+    control: texScaleXSlider,
+    update: () => texScaleXSlider.setValue(tree.options.bark.textureScale.x),
   });
+
+  const texScaleYSlider = createSlider(
+    'Texture Scale Y',
+    tree.options.bark.textureScale.y,
+    0.5,
+    5,
+    0.1,
+    (val) => {
+      tree.options.bark.textureScale.y = val;
+      onChange();
+    },
+  );
   barkSection.add(texScaleYSlider);
-  controls.push({ control: texScaleYSlider, update: () => texScaleYSlider.setValue(tree.options.bark.textureScale.y) });
+  controls.push({
+    control: texScaleYSlider,
+    update: () => texScaleYSlider.setValue(tree.options.bark.textureScale.y),
+  });
 
   parametersTab.appendChild(barkSection.element);
 
   // ----- Branches Section -----
   const branchSection = createSection('Branches', 'share', false);
 
-  const treeTypeSelect = createSelect('Tree Type', TreeType, tree.options.type, (val) => {
-    tree.options.type = val;
-    onChange();
-  });
+  const treeTypeSelect = createSelect(
+    'Tree Type',
+    TreeType,
+    tree.options.type,
+    (val) => {
+      tree.options.type = val;
+      onChange();
+    },
+  );
   branchSection.add(treeTypeSelect);
-  controls.push({ control: treeTypeSelect, update: () => treeTypeSelect.setValue(tree.options.type) });
-
-  const levelsSlider = createSlider('Levels', tree.options.branch.levels, 0, 3, 1, (val) => {
-    tree.options.branch.levels = val;
-    onChange();
+  controls.push({
+    control: treeTypeSelect,
+    update: () => treeTypeSelect.setValue(tree.options.type),
   });
+
+  const levelsSlider = createSlider(
+    'Levels',
+    tree.options.branch.levels,
+    0,
+    3,
+    1,
+    (val) => {
+      tree.options.branch.levels = val;
+      onChange();
+    },
+  );
   branchSection.add(levelsSlider);
-  controls.push({ control: levelsSlider, update: () => levelsSlider.setValue(tree.options.branch.levels) });
+  controls.push({
+    control: levelsSlider,
+    update: () => levelsSlider.setValue(tree.options.branch.levels),
+  });
 
   // Angle subsection
   const angleSubsection = createSubSection('Angle');
   for (let i = 1; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.angle[i], 0, 180, 1, (val) => {
-      tree.options.branch.angle[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.angle[i],
+      0,
+      180,
+      1,
+      (val) => {
+        tree.options.branch.angle[i] = val;
+        onChange();
+      },
+    );
     angleSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.angle[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.angle[i]),
+    });
   }
   branchSection.add(angleSubsection);
 
   // Children subsection
   const childrenSubsection = createSubSection('Children');
-  const childrenRanges = [[0, 100], [1, 10], [2, 5]];
+  const childrenRanges = [
+    [0, 100],
+    [1, 10],
+    [2, 5],
+  ];
   childrenRanges.forEach(([level, max]) => {
-    const slider = createSlider(`Level ${level}`, tree.options.branch.children[level], 0, max, 1, (val) => {
-      tree.options.branch.children[level] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${level}`,
+      tree.options.branch.children[level],
+      0,
+      max,
+      1,
+      (val) => {
+        tree.options.branch.children[level] = val;
+        onChange();
+      },
+    );
     childrenSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.children[level]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.children[level]),
+    });
   });
   branchSection.add(childrenSubsection);
 
   // Gnarliness subsection
   const gnarlinessSubsection = createSubSection('Gnarliness');
   for (let i = 0; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.gnarliness[i], -0.5, 0.5, 0.01, (val) => {
-      tree.options.branch.gnarliness[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.gnarliness[i],
+      -0.5,
+      0.5,
+      0.01,
+      (val) => {
+        tree.options.branch.gnarliness[i] = val;
+        onChange();
+      },
+    );
     gnarlinessSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.gnarliness[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.gnarliness[i]),
+    });
   }
   branchSection.add(gnarlinessSubsection);
 
   // Growth Direction subsection
   const forceSubsection = createSubSection('Growth Direction');
-  ['x', 'y', 'z'].forEach(axis => {
-    const slider = createSlider(`Direction ${axis.toUpperCase()}`, tree.options.branch.force.direction[axis], -1, 1, 0.01, (val) => {
-      tree.options.branch.force.direction[axis] = val;
-      onChange();
-    });
+  ['x', 'y', 'z'].forEach((axis) => {
+    const slider = createSlider(
+      `Direction ${axis.toUpperCase()}`,
+      tree.options.branch.force.direction[axis],
+      -1,
+      1,
+      0.01,
+      (val) => {
+        tree.options.branch.force.direction[axis] = val;
+        onChange();
+      },
+    );
     forceSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.force.direction[axis]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.force.direction[axis]),
+    });
   });
-  const strengthSlider = createSlider('Strength', tree.options.branch.force.strength, -0.1, 0.1, 0.001, (val) => {
-    tree.options.branch.force.strength = val;
-    onChange();
-  });
+  const strengthSlider = createSlider(
+    'Strength',
+    tree.options.branch.force.strength,
+    -0.1,
+    0.1,
+    0.001,
+    (val) => {
+      tree.options.branch.force.strength = val;
+      onChange();
+    },
+  );
   forceSubsection.add(strengthSlider);
-  controls.push({ control: strengthSlider, update: () => strengthSlider.setValue(tree.options.branch.force.strength) });
+  controls.push({
+    control: strengthSlider,
+    update: () => strengthSlider.setValue(tree.options.branch.force.strength),
+  });
   branchSection.add(forceSubsection);
 
   // Length subsection
   const lengthSubsection = createSubSection('Length');
   for (let i = 0; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.length[i], 0.1, 100, 0.1, (val) => {
-      tree.options.branch.length[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.length[i],
+      0.1,
+      100,
+      0.1,
+      (val) => {
+        tree.options.branch.length[i] = val;
+        onChange();
+      },
+    );
     lengthSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.length[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.length[i]),
+    });
   }
   branchSection.add(lengthSubsection);
 
   // Radius subsection
   const radiusSubsection = createSubSection('Radius');
   for (let i = 0; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.radius[i], 0.1, 5, 0.01, (val) => {
-      tree.options.branch.radius[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.radius[i],
+      0.1,
+      5,
+      0.01,
+      (val) => {
+        tree.options.branch.radius[i] = val;
+        onChange();
+      },
+    );
     radiusSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.radius[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.radius[i]),
+    });
   }
   branchSection.add(radiusSubsection);
 
   // Sections subsection
   const sectionsSubsection = createSubSection('Sections');
   for (let i = 0; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.sections[i], 1, 20, 1, (val) => {
-      tree.options.branch.sections[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.sections[i],
+      1,
+      20,
+      1,
+      (val) => {
+        tree.options.branch.sections[i] = val;
+        onChange();
+      },
+    );
     sectionsSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.sections[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.sections[i]),
+    });
   }
   branchSection.add(sectionsSubsection);
 
   // Segments subsection
   const segmentsSubsection = createSubSection('Segments');
   for (let i = 0; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.segments[i], 3, 16, 1, (val) => {
-      tree.options.branch.segments[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.segments[i],
+      3,
+      16,
+      1,
+      (val) => {
+        tree.options.branch.segments[i] = val;
+        onChange();
+      },
+    );
     segmentsSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.segments[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.segments[i]),
+    });
   }
   branchSection.add(segmentsSubsection);
 
   // Start subsection
   const startSubsection = createSubSection('Start Position');
   for (let i = 1; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.start[i], 0, 1, 0.01, (val) => {
-      tree.options.branch.start[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.start[i],
+      0,
+      1,
+      0.01,
+      (val) => {
+        tree.options.branch.start[i] = val;
+        onChange();
+      },
+    );
     startSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.start[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.start[i]),
+    });
   }
   branchSection.add(startSubsection);
 
   // Taper subsection
   const taperSubsection = createSubSection('Taper');
   for (let i = 0; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.taper[i], 0, 1, 0.01, (val) => {
-      tree.options.branch.taper[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.taper[i],
+      0,
+      1,
+      0.01,
+      (val) => {
+        tree.options.branch.taper[i] = val;
+        onChange();
+      },
+    );
     taperSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.taper[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.taper[i]),
+    });
   }
   branchSection.add(taperSubsection);
 
   // Twist subsection
   const twistSubsection = createSubSection('Twist');
   for (let i = 0; i <= 3; i++) {
-    const slider = createSlider(`Level ${i}`, tree.options.branch.twist[i], -0.5, 0.5, 0.01, (val) => {
-      tree.options.branch.twist[i] = val;
-      onChange();
-    });
+    const slider = createSlider(
+      `Level ${i}`,
+      tree.options.branch.twist[i],
+      -0.5,
+      0.5,
+      0.01,
+      (val) => {
+        tree.options.branch.twist[i] = val;
+        onChange();
+      },
+    );
     twistSubsection.add(slider);
-    controls.push({ control: slider, update: () => slider.setValue(tree.options.branch.twist[i]) });
+    controls.push({
+      control: slider,
+      update: () => slider.setValue(tree.options.branch.twist[i]),
+    });
   }
   branchSection.add(twistSubsection);
 
@@ -864,182 +1368,398 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   // ----- Leaves Section -----
   const leavesSection = createSection('Leaves', 'sparkles', false);
 
-  const leafTypeSelect = createSelect('Type', LeafType, tree.options.leaves.type, (val) => {
-    tree.options.leaves.type = val;
-    onChange();
-  });
+  const leafTypeSelect = createSelect(
+    'Type',
+    LeafType,
+    tree.options.leaves.type,
+    (val) => {
+      tree.options.leaves.type = val;
+      onChange();
+    },
+  );
   leavesSection.add(leafTypeSelect);
-  controls.push({ control: leafTypeSelect, update: () => leafTypeSelect.setValue(tree.options.leaves.type) });
-
-  const leafTintPicker = createColorPicker('Tint', tree.options.leaves.tint, (val) => {
-    tree.options.leaves.tint = val;
-    onChange();
+  controls.push({
+    control: leafTypeSelect,
+    update: () => leafTypeSelect.setValue(tree.options.leaves.type),
   });
+
+  const leafTintPicker = createColorPicker(
+    'Tint',
+    tree.options.leaves.tint,
+    (val) => {
+      tree.options.leaves.tint = val;
+      onChange();
+    },
+  );
   leavesSection.add(leafTintPicker);
-  controls.push({ control: leafTintPicker, update: () => leafTintPicker.setValue(tree.options.leaves.tint) });
-
-  const billboardSelect = createSelect('Billboard', Billboard, tree.options.leaves.billboard, (val) => {
-    tree.options.leaves.billboard = val;
-    onChange();
+  controls.push({
+    control: leafTintPicker,
+    update: () => leafTintPicker.setValue(tree.options.leaves.tint),
   });
+
+  const billboardSelect = createSelect(
+    'Billboard',
+    Billboard,
+    tree.options.leaves.billboard,
+    (val) => {
+      tree.options.leaves.billboard = val;
+      onChange();
+    },
+  );
   leavesSection.add(billboardSelect);
-  controls.push({ control: billboardSelect, update: () => billboardSelect.setValue(tree.options.leaves.billboard) });
-
-  const leafAngleSlider = createSlider('Angle', tree.options.leaves.angle, 0, 100, 1, (val) => {
-    tree.options.leaves.angle = val;
-    onChange();
+  controls.push({
+    control: billboardSelect,
+    update: () => billboardSelect.setValue(tree.options.leaves.billboard),
   });
+
+  const leafAngleSlider = createSlider(
+    'Angle',
+    tree.options.leaves.angle,
+    0,
+    100,
+    1,
+    (val) => {
+      tree.options.leaves.angle = val;
+      onChange();
+    },
+  );
   leavesSection.add(leafAngleSlider);
-  controls.push({ control: leafAngleSlider, update: () => leafAngleSlider.setValue(tree.options.leaves.angle) });
-
-  const leafCountSlider = createSlider('Count', tree.options.leaves.count, 0, 100, 1, (val) => {
-    tree.options.leaves.count = val;
-    onChange();
+  controls.push({
+    control: leafAngleSlider,
+    update: () => leafAngleSlider.setValue(tree.options.leaves.angle),
   });
+
+  const leafCountSlider = createSlider(
+    'Count',
+    tree.options.leaves.count,
+    0,
+    100,
+    1,
+    (val) => {
+      tree.options.leaves.count = val;
+      onChange();
+    },
+  );
   leavesSection.add(leafCountSlider);
-  controls.push({ control: leafCountSlider, update: () => leafCountSlider.setValue(tree.options.leaves.count) });
-
-  const leafStartSlider = createSlider('Start', tree.options.leaves.start, 0, 1, 0.01, (val) => {
-    tree.options.leaves.start = val;
-    onChange();
+  controls.push({
+    control: leafCountSlider,
+    update: () => leafCountSlider.setValue(tree.options.leaves.count),
   });
+
+  const leafStartSlider = createSlider(
+    'Start',
+    tree.options.leaves.start,
+    0,
+    1,
+    0.01,
+    (val) => {
+      tree.options.leaves.start = val;
+      onChange();
+    },
+  );
   leavesSection.add(leafStartSlider);
-  controls.push({ control: leafStartSlider, update: () => leafStartSlider.setValue(tree.options.leaves.start) });
-
-  const leafSizeSlider = createSlider('Size', tree.options.leaves.size, 0, 10, 0.1, (val) => {
-    tree.options.leaves.size = val;
-    onChange();
+  controls.push({
+    control: leafStartSlider,
+    update: () => leafStartSlider.setValue(tree.options.leaves.start),
   });
+
+  const leafSizeSlider = createSlider(
+    'Size',
+    tree.options.leaves.size,
+    0,
+    10,
+    0.1,
+    (val) => {
+      tree.options.leaves.size = val;
+      onChange();
+    },
+  );
   leavesSection.add(leafSizeSlider);
-  controls.push({ control: leafSizeSlider, update: () => leafSizeSlider.setValue(tree.options.leaves.size) });
-
-  const leafVarianceSlider = createSlider('Size Variance', tree.options.leaves.sizeVariance, 0, 1, 0.01, (val) => {
-    tree.options.leaves.sizeVariance = val;
-    onChange();
+  controls.push({
+    control: leafSizeSlider,
+    update: () => leafSizeSlider.setValue(tree.options.leaves.size),
   });
+
+  const leafVarianceSlider = createSlider(
+    'Size Variance',
+    tree.options.leaves.sizeVariance,
+    0,
+    1,
+    0.01,
+    (val) => {
+      tree.options.leaves.sizeVariance = val;
+      onChange();
+    },
+  );
   leavesSection.add(leafVarianceSlider);
-  controls.push({ control: leafVarianceSlider, update: () => leafVarianceSlider.setValue(tree.options.leaves.sizeVariance) });
-
-  const alphaTestSlider = createSlider('Alpha Test', tree.options.leaves.alphaTest, 0, 1, 0.01, (val) => {
-    tree.options.leaves.alphaTest = val;
-    onChange();
+  controls.push({
+    control: leafVarianceSlider,
+    update: () => leafVarianceSlider.setValue(tree.options.leaves.sizeVariance),
   });
+
+  const alphaTestSlider = createSlider(
+    'Alpha Test',
+    tree.options.leaves.alphaTest,
+    0,
+    1,
+    0.01,
+    (val) => {
+      tree.options.leaves.alphaTest = val;
+      onChange();
+    },
+  );
   leavesSection.add(alphaTestSlider);
-  controls.push({ control: alphaTestSlider, update: () => alphaTestSlider.setValue(tree.options.leaves.alphaTest) });
-
-  const roundedNormalsToggle = createToggle('Rounded Normals', tree.options.leaves.roundedNormals, (val) => {
-    tree.options.leaves.roundedNormals = val;
-    onChange();
+  controls.push({
+    control: alphaTestSlider,
+    update: () => alphaTestSlider.setValue(tree.options.leaves.alphaTest),
   });
+
+  const roundedNormalsToggle = createToggle(
+    'Rounded Normals',
+    tree.options.leaves.roundedNormals,
+    (val) => {
+      tree.options.leaves.roundedNormals = val;
+      onChange();
+    },
+  );
   leavesSection.add(roundedNormalsToggle);
-  controls.push({ control: roundedNormalsToggle, update: () => roundedNormalsToggle.setValue(tree.options.leaves.roundedNormals) });
+  controls.push({
+    control: roundedNormalsToggle,
+    update: () =>
+      roundedNormalsToggle.setValue(tree.options.leaves.roundedNormals),
+  });
 
   parametersTab.appendChild(leavesSection.element);
 
   // ----- Trellis Section -----
   const trellisSection = createSection('Trellis', 'share', false);
 
-  const trellisEnabledToggle = createToggle('Enabled', tree.options.trellis.enabled, (val) => {
-    tree.options.trellis.enabled = val;
-    onChange();
-  });
+  const trellisEnabledToggle = createToggle(
+    'Enabled',
+    tree.options.trellis.enabled,
+    (val) => {
+      tree.options.trellis.enabled = val;
+      onChange();
+    },
+  );
   trellisSection.add(trellisEnabledToggle);
-  controls.push({ control: trellisEnabledToggle, update: () => trellisEnabledToggle.setValue(tree.options.trellis.enabled) });
-
-  const trellisVisibleToggle = createToggle('Visible', tree.options.trellis.visible, (val) => {
-    tree.options.trellis.visible = val;
-    onChange();
+  controls.push({
+    control: trellisEnabledToggle,
+    update: () => trellisEnabledToggle.setValue(tree.options.trellis.enabled),
   });
+
+  const trellisVisibleToggle = createToggle(
+    'Visible',
+    tree.options.trellis.visible,
+    (val) => {
+      tree.options.trellis.visible = val;
+      onChange();
+    },
+  );
   trellisSection.add(trellisVisibleToggle);
-  controls.push({ control: trellisVisibleToggle, update: () => trellisVisibleToggle.setValue(tree.options.trellis.visible) });
+  controls.push({
+    control: trellisVisibleToggle,
+    update: () => trellisVisibleToggle.setValue(tree.options.trellis.visible),
+  });
 
   // Position subsection
   const trellisPositionSubsection = createSubSection('Position');
-  const trellisPosXSlider = createSlider('X', tree.options.trellis.position.x, -20, 20, 0.1, (val) => {
-    tree.options.trellis.position.x = val;
-    onChange();
-  });
+  const trellisPosXSlider = createSlider(
+    'X',
+    tree.options.trellis.position.x,
+    -20,
+    20,
+    0.1,
+    (val) => {
+      tree.options.trellis.position.x = val;
+      onChange();
+    },
+  );
   trellisPositionSubsection.add(trellisPosXSlider);
-  controls.push({ control: trellisPosXSlider, update: () => trellisPosXSlider.setValue(tree.options.trellis.position.x) });
-
-  const trellisPosYSlider = createSlider('Y', tree.options.trellis.position.y, -10, 10, 0.1, (val) => {
-    tree.options.trellis.position.y = val;
-    onChange();
+  controls.push({
+    control: trellisPosXSlider,
+    update: () => trellisPosXSlider.setValue(tree.options.trellis.position.x),
   });
+
+  const trellisPosYSlider = createSlider(
+    'Y',
+    tree.options.trellis.position.y,
+    -10,
+    10,
+    0.1,
+    (val) => {
+      tree.options.trellis.position.y = val;
+      onChange();
+    },
+  );
   trellisPositionSubsection.add(trellisPosYSlider);
-  controls.push({ control: trellisPosYSlider, update: () => trellisPosYSlider.setValue(tree.options.trellis.position.y) });
-
-  const trellisPosZSlider = createSlider('Z', tree.options.trellis.position.z, -20, 20, 0.1, (val) => {
-    tree.options.trellis.position.z = val;
-    onChange();
+  controls.push({
+    control: trellisPosYSlider,
+    update: () => trellisPosYSlider.setValue(tree.options.trellis.position.y),
   });
+
+  const trellisPosZSlider = createSlider(
+    'Z',
+    tree.options.trellis.position.z,
+    -20,
+    20,
+    0.1,
+    (val) => {
+      tree.options.trellis.position.z = val;
+      onChange();
+    },
+  );
   trellisPositionSubsection.add(trellisPosZSlider);
-  controls.push({ control: trellisPosZSlider, update: () => trellisPosZSlider.setValue(tree.options.trellis.position.z) });
+  controls.push({
+    control: trellisPosZSlider,
+    update: () => trellisPosZSlider.setValue(tree.options.trellis.position.z),
+  });
   trellisSection.add(trellisPositionSubsection);
 
   // Dimensions subsection
   const trellisDimensionsSubsection = createSubSection('Dimensions');
-  const trellisWidthSlider = createSlider('Width', tree.options.trellis.width, 1, 50, 0.5, (val) => {
-    tree.options.trellis.width = val;
-    onChange();
-  });
+  const trellisWidthSlider = createSlider(
+    'Width',
+    tree.options.trellis.width,
+    1,
+    50,
+    0.5,
+    (val) => {
+      tree.options.trellis.width = val;
+      onChange();
+    },
+  );
   trellisDimensionsSubsection.add(trellisWidthSlider);
-  controls.push({ control: trellisWidthSlider, update: () => trellisWidthSlider.setValue(tree.options.trellis.width) });
-
-  const trellisHeightSlider = createSlider('Height', tree.options.trellis.height, 1, 50, 0.5, (val) => {
-    tree.options.trellis.height = val;
-    onChange();
+  controls.push({
+    control: trellisWidthSlider,
+    update: () => trellisWidthSlider.setValue(tree.options.trellis.width),
   });
+
+  const trellisHeightSlider = createSlider(
+    'Height',
+    tree.options.trellis.height,
+    1,
+    50,
+    0.5,
+    (val) => {
+      tree.options.trellis.height = val;
+      onChange();
+    },
+  );
   trellisDimensionsSubsection.add(trellisHeightSlider);
-  controls.push({ control: trellisHeightSlider, update: () => trellisHeightSlider.setValue(tree.options.trellis.height) });
-
-  const trellisSpacingSlider = createSlider('Spacing', tree.options.trellis.spacing, 0.5, 10, 0.1, (val) => {
-    tree.options.trellis.spacing = val;
-    onChange();
+  controls.push({
+    control: trellisHeightSlider,
+    update: () => trellisHeightSlider.setValue(tree.options.trellis.height),
   });
+
+  const trellisSpacingSlider = createSlider(
+    'Spacing',
+    tree.options.trellis.spacing,
+    0.5,
+    10,
+    0.1,
+    (val) => {
+      tree.options.trellis.spacing = val;
+      onChange();
+    },
+  );
   trellisDimensionsSubsection.add(trellisSpacingSlider);
-  controls.push({ control: trellisSpacingSlider, update: () => trellisSpacingSlider.setValue(tree.options.trellis.spacing) });
+  controls.push({
+    control: trellisSpacingSlider,
+    update: () => trellisSpacingSlider.setValue(tree.options.trellis.spacing),
+  });
   trellisSection.add(trellisDimensionsSubsection);
 
   // Force subsection
   const trellisForceSubsection = createSubSection('Force');
-  const trellisStrengthSlider = createSlider('Strength', tree.options.trellis.force.strength, 0, 0.2, 0.001, (val) => {
-    tree.options.trellis.force.strength = val;
-    onChange();
-  });
+  const trellisStrengthSlider = createSlider(
+    'Strength',
+    tree.options.trellis.force.strength,
+    0,
+    0.2,
+    0.001,
+    (val) => {
+      tree.options.trellis.force.strength = val;
+      onChange();
+    },
+  );
   trellisForceSubsection.add(trellisStrengthSlider);
-  controls.push({ control: trellisStrengthSlider, update: () => trellisStrengthSlider.setValue(tree.options.trellis.force.strength) });
-
-  const trellisMaxDistSlider = createSlider('Max Distance', tree.options.trellis.force.maxDistance, 0.5, 20, 0.1, (val) => {
-    tree.options.trellis.force.maxDistance = val;
-    onChange();
+  controls.push({
+    control: trellisStrengthSlider,
+    update: () =>
+      trellisStrengthSlider.setValue(tree.options.trellis.force.strength),
   });
+
+  const trellisMaxDistSlider = createSlider(
+    'Max Distance',
+    tree.options.trellis.force.maxDistance,
+    0.5,
+    20,
+    0.1,
+    (val) => {
+      tree.options.trellis.force.maxDistance = val;
+      onChange();
+    },
+  );
   trellisForceSubsection.add(trellisMaxDistSlider);
-  controls.push({ control: trellisMaxDistSlider, update: () => trellisMaxDistSlider.setValue(tree.options.trellis.force.maxDistance) });
-
-  const trellisFalloffSlider = createSlider('Falloff', tree.options.trellis.force.falloff, 0.1, 3, 0.1, (val) => {
-    tree.options.trellis.force.falloff = val;
-    onChange();
+  controls.push({
+    control: trellisMaxDistSlider,
+    update: () =>
+      trellisMaxDistSlider.setValue(tree.options.trellis.force.maxDistance),
   });
+
+  const trellisFalloffSlider = createSlider(
+    'Falloff',
+    tree.options.trellis.force.falloff,
+    0.1,
+    3,
+    0.1,
+    (val) => {
+      tree.options.trellis.force.falloff = val;
+      onChange();
+    },
+  );
   trellisForceSubsection.add(trellisFalloffSlider);
-  controls.push({ control: trellisFalloffSlider, update: () => trellisFalloffSlider.setValue(tree.options.trellis.force.falloff) });
+  controls.push({
+    control: trellisFalloffSlider,
+    update: () =>
+      trellisFalloffSlider.setValue(tree.options.trellis.force.falloff),
+  });
   trellisSection.add(trellisForceSubsection);
 
   // Appearance subsection
   const trellisAppearanceSubsection = createSubSection('Appearance');
-  const trellisCylinderRadiusSlider = createSlider('Cylinder Radius', tree.options.trellis.cylinderRadius, 0.01, 0.5, 0.01, (val) => {
-    tree.options.trellis.cylinderRadius = val;
-    onChange();
-  });
+  const trellisCylinderRadiusSlider = createSlider(
+    'Cylinder Radius',
+    tree.options.trellis.cylinderRadius,
+    0.01,
+    0.5,
+    0.01,
+    (val) => {
+      tree.options.trellis.cylinderRadius = val;
+      onChange();
+    },
+  );
   trellisAppearanceSubsection.add(trellisCylinderRadiusSlider);
-  controls.push({ control: trellisCylinderRadiusSlider, update: () => trellisCylinderRadiusSlider.setValue(tree.options.trellis.cylinderRadius) });
-
-  const trellisColorPicker = createColorPicker('Color', tree.options.trellis.color, (val) => {
-    tree.options.trellis.color = val;
-    onChange();
+  controls.push({
+    control: trellisCylinderRadiusSlider,
+    update: () =>
+      trellisCylinderRadiusSlider.setValue(tree.options.trellis.cylinderRadius),
   });
+
+  const trellisColorPicker = createColorPicker(
+    'Color',
+    tree.options.trellis.color,
+    (val) => {
+      tree.options.trellis.color = val;
+      onChange();
+    },
+  );
   trellisAppearanceSubsection.add(trellisColorPicker);
-  controls.push({ control: trellisColorPicker, update: () => trellisColorPicker.setValue(tree.options.trellis.color) });
+  controls.push({
+    control: trellisColorPicker,
+    update: () => trellisColorPicker.setValue(tree.options.trellis.color),
+  });
   trellisSection.add(trellisAppearanceSubsection);
 
   parametersTab.appendChild(trellisSection.element);
@@ -1047,44 +1767,135 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   // ----- Camera Section -----
   const cameraSection = createSection('Camera', 'videoCamera', false);
 
-  const autoRotateToggle = createToggle('Auto Rotate', orbitControls.autoRotate, (val) => {
-    orbitControls.autoRotate = val;
-  });
+  const autoRotateToggle = createToggle(
+    'Auto Rotate',
+    orbitControls.autoRotate,
+    (val) => {
+      orbitControls.autoRotate = val;
+    },
+  );
   cameraSection.add(autoRotateToggle);
-  controls.push({ control: autoRotateToggle, update: () => autoRotateToggle.setValue(orbitControls.autoRotate) });
-
-  const rotateSpeedSlider = createSlider('Rotate Speed', orbitControls.autoRotateSpeed, 0, 2, 0.1, (val) => {
-    orbitControls.autoRotateSpeed = val;
+  controls.push({
+    control: autoRotateToggle,
+    update: () => autoRotateToggle.setValue(orbitControls.autoRotate),
   });
+
+  const rotateSpeedSlider = createSlider(
+    'Rotate Speed',
+    orbitControls.autoRotateSpeed,
+    0,
+    2,
+    0.1,
+    (val) => {
+      orbitControls.autoRotateSpeed = val;
+    },
+  );
   cameraSection.add(rotateSpeedSlider);
-  controls.push({ control: rotateSpeedSlider, update: () => rotateSpeedSlider.setValue(orbitControls.autoRotateSpeed) });
+  controls.push({
+    control: rotateSpeedSlider,
+    update: () => rotateSpeedSlider.setValue(orbitControls.autoRotateSpeed),
+  });
 
   parametersTab.appendChild(cameraSection.element);
 
   // ----- Environment Section -----
   const environmentSection = createSection('Environment', 'sun', false);
 
-  const sunAzimuthSlider = createSlider('Sun Angle', environment.skybox.sunAzimuth, 0, 360, 1, (val) => {
-    environment.skybox.sunAzimuth = val;
-  });
+  const sunAzimuthSlider = createSlider(
+    'Sun Angle',
+    environment.skybox.sunAzimuth,
+    0,
+    360,
+    1,
+    (val) => {
+      environment.skybox.sunAzimuth = val;
+    },
+  );
   environmentSection.add(sunAzimuthSlider);
-  controls.push({ control: sunAzimuthSlider, update: () => sunAzimuthSlider.setValue(environment.skybox.sunAzimuth) });
-
-  const grassCountSlider = createSlider('Grass Count', environment.grass.instanceCount, 0, 25000, 100, (val) => {
-    environment.grass.instanceCount = val;
+  controls.push({
+    control: sunAzimuthSlider,
+    update: () => sunAzimuthSlider.setValue(environment.skybox.sunAzimuth),
   });
+
+  const sunElevationSlider = createSlider(
+    'Sun Elevation',
+    environment.skybox.sunElevation,
+    5,
+    80,
+    1,
+    (val) => {
+      environment.skybox.sunElevation = val;
+    },
+  );
+  environmentSection.add(sunElevationSlider);
+  controls.push({
+    control: sunElevationSlider,
+    update: () => sunElevationSlider.setValue(environment.skybox.sunElevation),
+  });
+
+  const keyLightSlider = createSlider(
+    'Key Light',
+    toonStyle.keyLightIntensity,
+    0,
+    8,
+    0.1,
+    (val) => {
+      toonStyle.keyLightIntensity = val;
+      refreshToonLook();
+    },
+  );
+  environmentSection.add(keyLightSlider);
+  controls.push({
+    control: keyLightSlider,
+    update: () => keyLightSlider.setValue(toonStyle.keyLightIntensity),
+  });
+
+  const fillLightSlider = createSlider(
+    'Fill Light',
+    toonStyle.fillLightIntensity,
+    0,
+    4,
+    0.05,
+    (val) => {
+      toonStyle.fillLightIntensity = val;
+      refreshToonLook();
+    },
+  );
+  environmentSection.add(fillLightSlider);
+  controls.push({
+    control: fillLightSlider,
+    update: () => fillLightSlider.setValue(toonStyle.fillLightIntensity),
+  });
+
+  const grassCountSlider = createSlider(
+    'Grass Count',
+    environment.grass.instanceCount,
+    0,
+    25000,
+    100,
+    (val) => {
+      environment.grass.instanceCount = val;
+    },
+  );
   environmentSection.add(grassCountSlider);
-  controls.push({ control: grassCountSlider, update: () => grassCountSlider.setValue(environment.grass.instanceCount) });
+  controls.push({
+    control: grassCountSlider,
+    update: () => grassCountSlider.setValue(environment.grass.instanceCount),
+  });
 
   parametersTab.appendChild(environmentSection.element);
 
   // ----- Info Section -----
   const infoSection = createSection('Info', 'info', false);
 
-  const vertexDisplay = createDisplay('Vertices', tree.vertexCount, (v) => Math.round(v).toLocaleString());
+  const vertexDisplay = createDisplay('Vertices', tree.vertexCount, (v) =>
+    Math.round(v).toLocaleString(),
+  );
   infoSection.add(vertexDisplay);
 
-  const triangleDisplay = createDisplay('Triangles', tree.triangleCount, (v) => Math.round(v).toLocaleString());
+  const triangleDisplay = createDisplay('Triangles', tree.triangleCount, (v) =>
+    Math.round(v).toLocaleString(),
+  );
   infoSection.add(triangleDisplay);
 
   const versionDisplay = createDisplay('Version', version);
@@ -1103,7 +1914,10 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     triangleDisplay.setValue(triangles);
     statsVertices.textContent = Math.round(vertices).toLocaleString();
     statsTriangles.textContent = Math.round(triangles).toLocaleString();
-    statsBuildTime.textContent = lastBuildMs == null ? '–' : Math.max(1, Math.round(lastBuildMs)).toString();
+    statsBuildTime.textContent =
+      lastBuildMs == null
+        ? '–'
+        : Math.max(1, Math.round(lastBuildMs)).toString();
     pulseStat(statsTriangles);
     pulseStat(statsVertices);
     pulseStat(statsBuildTime);
@@ -1120,7 +1934,7 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     const json = JSON.stringify(tree.options, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     link.href = URL.createObjectURL(blob);
-    link.download = 'tree.json';
+    link.download = 'toon-tree.json';
     link.click();
   });
   exportSection.add(savePresetBtn);
@@ -1132,7 +1946,11 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
 
   exportTab.appendChild(exportSection.element);
 
-  const exportModelsSection = createSection('Export Models', 'cubeTransparent', true);
+  const exportModelsSection = createSection(
+    'Export Models',
+    'cubeTransparent',
+    true,
+  );
 
   /**
    * GLTFExporter aborts on textures whose image never loaded (e.g. the
@@ -1144,12 +1962,24 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
   function stripBrokenTextures(root) {
     const restores = [];
     root.traverse((o) => {
-      const materials = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      const materials = Array.isArray(o.material)
+        ? o.material
+        : o.material
+          ? [o.material]
+          : [];
       for (const material of materials) {
-        for (const key of ['map', 'aoMap', 'normalMap', 'roughnessMap', 'metalnessMap']) {
+        for (const key of [
+          'map',
+          'aoMap',
+          'normalMap',
+          'roughnessMap',
+          'metalnessMap',
+        ]) {
           const texture = material[key];
           if (texture?.isTexture && !texture.image) {
-            restores.push(() => { material[key] = texture; });
+            restores.push(() => {
+              material[key] = texture;
+            });
             material[key] = null;
           }
         }
@@ -1158,132 +1988,165 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
     return () => restores.forEach((restore) => restore());
   }
 
-  const exportGlbBtn = createButton('Export GLB (Full Detail)', 'download', async ({ setStatus }) => {
-    setStatus('Exporting GLB…');
-    // Export at full detail regardless of the active LOD preview
-    const restoreLevel = previewLevel;
-    if (restoreLevel !== 0) {
-      setPreviewLevel(0);
-    }
-    const restoreTextures = stripBrokenTextures(tree);
-    try {
-      await paint();
-      const glb = await new Promise((resolve, reject) =>
-        exporter.parse(tree, resolve, reject, { binary: true }),
-      );
-      const blob = new Blob([glb], { type: 'application/octet-stream' });
-      const link = document.getElementById('downloadLink');
-      link.href = window.URL.createObjectURL(blob);
-      link.download = 'tree.glb';
-      link.click();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      restoreTextures();
+  function stampToonMetadata(root) {
+    root.userData.toonShading = {
+      ...toonStyle,
+      generator: '@pajama-studio/ez-tree-toon',
+      normalSpace: 'object',
+    };
+    root.traverse((object) => {
+      if (!object.isMesh) return;
+      object.userData.toonNormalBake = object.geometry?.userData
+        ?.toonNormalBake ?? {
+        mode: 'source',
+      };
+    });
+  }
+
+  const exportGlbBtn = createButton(
+    'Export Toon GLB (Baked Normals)',
+    'download',
+    async ({ setStatus }) => {
+      setStatus('Exporting GLB…');
+      // Export at full detail regardless of the active LOD preview
+      const restoreLevel = previewLevel;
       if (restoreLevel !== 0) {
-        setPreviewLevel(restoreLevel);
+        setPreviewLevel(0);
       }
-    }
-  });
+      const restoreTextures = stripBrokenTextures(tree);
+      try {
+        stampToonMetadata(tree);
+        await paint();
+        const glb = await new Promise((resolve, reject) =>
+          exporter.parse(tree, resolve, reject, { binary: true }),
+        );
+        const blob = new Blob([glb], { type: 'application/octet-stream' });
+        const link = document.getElementById('downloadLink');
+        link.href = window.URL.createObjectURL(blob);
+        link.download = 'toon-tree.glb';
+        link.click();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        restoreTextures();
+        if (restoreLevel !== 0) {
+          setPreviewLevel(restoreLevel);
+        }
+      }
+    },
+  );
   exportModelsSection.add(exportGlbBtn);
 
-  const exportLodsBtn = createButton('Export LODs (ZIP)', 'archive', async ({ setStatus }) => {
-    const restoreTextures = stripBrokenTextures(tree);
-    try {
-      const files = {};
-      for (let i = 0; i < Tree.defaultLODLevels.length; i++) {
-        setStatus(`Exporting LOD ${i + 1}/${Tree.defaultLODLevels.length}…`);
+  const exportLodsBtn = createButton(
+    'Export LODs (ZIP)',
+    'archive',
+    async ({ setStatus }) => {
+      const restoreTextures = stripBrokenTextures(tree);
+      try {
+        const files = {};
+        for (let i = 0; i < Tree.defaultLODLevels.length; i++) {
+          setStatus(`Exporting LOD ${i + 1}/${Tree.defaultLODLevels.length}…`);
+          await paint();
+
+          const { detail } = Tree.defaultLODLevels[i];
+          const { branches, leaves } = tree.createGeometry(detail ?? {});
+
+          try {
+            const branchesMesh = new THREE.Mesh(
+              branches,
+              tree.branchesMesh.material,
+            );
+            branchesMesh.name = `Branches_LOD${i}`;
+            const leavesMesh = new THREE.Mesh(leaves, tree.leavesMesh.material);
+            leavesMesh.name = `Leaves_LOD${i}`;
+            const group = new THREE.Group();
+            group.name = `Tree_LOD${i}`;
+            group.add(branchesMesh, leavesMesh);
+            stampToonMetadata(group);
+
+            const glb = await new Promise((resolve, reject) =>
+              exporter.parse(group, resolve, reject, { binary: true }),
+            );
+            files[`tree_LOD${i}.glb`] = new Uint8Array(glb);
+          } finally {
+            branches.dispose();
+            leaves.dispose();
+          }
+        }
+
+        setStatus('Zipping…');
         await paint();
 
-        const { detail } = Tree.defaultLODLevels[i];
-        const { branches, leaves } = tree.createGeometry(detail ?? {});
-
-        try {
-          const branchesMesh = new THREE.Mesh(branches, tree.branchesMesh.material);
-          branchesMesh.name = `Branches_LOD${i}`;
-          const leavesMesh = new THREE.Mesh(leaves, tree.leavesMesh.material);
-          leavesMesh.name = `Leaves_LOD${i}`;
-          const group = new THREE.Group();
-          group.name = `Tree_LOD${i}`;
-          group.add(branchesMesh, leavesMesh);
-
-          const glb = await new Promise((resolve, reject) =>
-            exporter.parse(group, resolve, reject, { binary: true }),
-          );
-          files[`tree_LOD${i}.glb`] = new Uint8Array(glb);
-        } finally {
-          branches.dispose();
-          leaves.dispose();
-        }
+        const blob = new Blob([zipSync(files)], { type: 'application/zip' });
+        const link = document.getElementById('downloadLink');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'toon-tree_lods.zip';
+        link.click();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        restoreTextures();
       }
-
-      setStatus('Zipping…');
-      await paint();
-
-      const blob = new Blob([zipSync(files)], { type: 'application/zip' });
-      const link = document.getElementById('downloadLink');
-      link.href = URL.createObjectURL(blob);
-      link.download = 'tree_lods.zip';
-      link.click();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      restoreTextures();
-    }
-  });
+    },
+  );
   exportModelsSection.add(exportLodsBtn);
 
-  const exportPngBtn = createButton('Export PNG', 'photo', async ({ setStatus }) => {
-    setStatus('Exporting PNG…');
-    await paint();
+  const exportPngBtn = createButton(
+    'Export PNG',
+    'photo',
+    async ({ setStatus }) => {
+      setStatus('Exporting PNG…');
+      await paint();
 
-    renderer.setClearColor(0, 0);
-    const fog = scene.fog;
-    scene.fog = null;
+      renderer.setClearColor(0, 0);
+      const fog = scene.fog;
+      scene.fog = null;
 
-    scene.traverse((o) => {
-      if (o.name === 'Skybox') {
-        o.material.side = THREE.FrontSide;
-      } else if (o.isMesh) {
-        o.visible = false;
-      }
-    });
-    tree.traverse((o) => o.visible = true);
-
-    try {
-      renderer.render(scene, camera);
-
-      const link = document.getElementById('downloadLink');
-      link.href = renderer.domElement.toDataURL('image/png');
-      link.download = 'tree.png';
-      link.click();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      renderer.setClearColor(0);
-      scene.fog = fog;
       scene.traverse((o) => {
         if (o.name === 'Skybox') {
-          o.material.side = THREE.BackSide;
+          o.material.side = THREE.FrontSide;
+        } else if (o.isMesh) {
+          o.visible = false;
         }
-        o.visible = true;
       });
-    }
-  });
+      tree.traverse((o) => (o.visible = true));
+
+      try {
+        if (toonRuntime?.composer) {
+          toonRuntime.composer.render();
+        } else {
+          renderer.render(scene, camera);
+        }
+
+        const link = document.getElementById('downloadLink');
+        link.href = renderer.domElement.toDataURL('image/png');
+        link.download = 'toon-tree.png';
+        link.click();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        renderer.setClearColor(0);
+        scene.fog = fog;
+        scene.traverse((o) => {
+          if (o.name === 'Skybox') {
+            o.material.side = THREE.BackSide;
+          }
+          o.visible = true;
+        });
+      }
+    },
+  );
   exportModelsSection.add(exportPngBtn);
 
   exportTab.appendChild(exportModelsSection.element);
 
-  // Panel footer with course link
+  // Project attribution and upstream link
   const footer = document.createElement('div');
   footer.className = 'panel-footer';
   footer.innerHTML = `
-    <p class="panel-footer-heading">Enjoying EZ-Tree? Try my other assets</p>
-    <a href="https://threejsroadmap.com/assets/threejs-water-pro?utm_source=eztree" target="_blank" class="panel-footer-link">
-      🌊 Three.js Water Pro
-    </a>
-    <a href="https://threejsroadmap.com/assets/threejs-sky-pro?utm_source=eztree" target="_blank" class="panel-footer-link">
-      ☁️ Three.js Sky Pro
+    <p class="panel-footer-heading">Pajama Studio toon adaptation</p>
+    <a href="https://github.com/dgreenheck/ez-tree" target="_blank" class="panel-footer-link">
+      Original EZ-Tree by Daniel Greenheck
     </a>
   `;
   panel.appendChild(footer);
@@ -1302,8 +2165,12 @@ export function setupUI(tree, environment, renderer, scene, camera, orbitControl
       const reader = new FileReader();
       reader.onload = function (e) {
         try {
-          tree.options = JSON.parse(e.target.result);
+          const json = JSON.parse(e.target.result);
+          tree.options.copy(json);
+          Object.assign(toonStyle, json.toon ?? {});
+          tree.options.toon = toonStyle;
           tree.generate();
+          refreshToonLook();
           if (previewLevel > 0) {
             applyLODPreview();
           }

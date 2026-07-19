@@ -42,10 +42,10 @@ export class SkyboxOptions {
  */
 export class Skybox extends THREE.Mesh {
   /**
-   * 
-   * @param {SkyboxOptions} options 
+   *
+   * @param {SkyboxOptions} options
    */
-  constructor(options = new SkyboxOptions()) {
+  constructor(options = new SkyboxOptions(), toonOptions = {}) {
     super();
 
     this.name = 'Skybox';
@@ -63,13 +63,14 @@ export class Skybox extends THREE.Mesh {
         uSunColor: { value: options.sunColor },
         uSkyColorLow: { value: options.skyColorLow },
         uSkyColorHigh: { value: options.skyColorHigh },
-        uSunSize: { value: options.sunSize }
+        uSunSize: { value: options.sunSize },
+        uSkySteps: { value: toonOptions.steps ?? 4 },
       },
-      side: THREE.BackSide
+      side: THREE.BackSide,
     });
 
     this.sun = new THREE.DirectionalLight();
-    this.sun.intensity = 5;
+    this.sun.intensity = toonOptions.keyLightIntensity ?? 3.2;
     this.sun.color = options.sunColor;
     this.sun.position.set(50, 100, 50);
     this.sun.castShadow = true;
@@ -77,13 +78,17 @@ export class Skybox extends THREE.Mesh {
     this.sun.shadow.camera.right = 100;
     this.sun.shadow.camera.top = 100;
     this.sun.shadow.camera.bottom = -100;
-    this.sun.shadow.mapSize = new THREE.Vector2(512, 512);
+    this.sun.shadow.mapSize = new THREE.Vector2(2048, 2048);
     this.sun.shadow.bias = -0.001;
     this.sun.shadow.normalBias = 0.2;
     this.add(this.sun);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-    this.add(ambientLight);
+    this.fill = new THREE.HemisphereLight(
+      options.skyColorLow,
+      0x5a6b4e,
+      toonOptions.fillLightIntensity ?? 1.35,
+    );
+    this.add(this.fill);
 
     this.updateSunPosition();
   }
@@ -95,7 +100,7 @@ export class Skybox extends THREE.Mesh {
     this.sun.position.set(
       100 * Math.cos(el) * Math.sin(az),
       100 * Math.sin(el),
-      100 * Math.cos(el) * Math.cos(az)
+      100 * Math.cos(el) * Math.cos(az),
     );
   }
 
@@ -135,6 +140,10 @@ export class Skybox extends THREE.Mesh {
     this.sun.color = color;
   }
 
+  setToonSteps(steps) {
+    this.material.uniforms.uSkySteps.value = steps;
+  }
+
   /**
    * @returns {THREE.Color}
    */
@@ -147,8 +156,8 @@ export class Skybox extends THREE.Mesh {
   }
 
   /**
-    * @returns {THREE.Color}
-    */
+   * @returns {THREE.Color}
+   */
   get skyColorHigh() {
     return this.material.uniforms.uSkyColorHigh.value;
   }

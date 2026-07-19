@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/Addons.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { simplex2d } from './noise';
+import { configureToonMaterial } from '@pajama-studio/ez-tree-toon';
+import { toonifyMaterial } from './toon-scene';
 
 let loaded = false;
 let _grassMesh = null;
@@ -61,13 +63,14 @@ export class GrassOptions {
 }
 
 export class Grass extends THREE.Object3D {
-  constructor(options = new GrassOptions()) {
+  constructor(options = new GrassOptions(), toonOptions) {
     super();
 
     /**
      * @type {GrassOptions}
      */
     this.options = options;
+    this.toonOptions = toonOptions;
 
     this.flowers = new THREE.Group();
     this.add(this.flowers);
@@ -89,7 +92,7 @@ export class Grass extends THREE.Object3D {
   }
 
   /**
-   * 
+   *
    * @returns {Promise<THREE.Geometry>}
    */
   async fetchAssets() {
@@ -97,19 +100,23 @@ export class Grass extends THREE.Object3D {
 
     const gltfLoader = new GLTFLoader();
 
-    _grassMesh = (await gltfLoader.loadAsync('/models/grass.glb')).scene.children[0];
-    _whiteFlower = (await gltfLoader.loadAsync('/models/flower_white.glb')).scene.children[0];
-    _blueFlower = (await gltfLoader.loadAsync('/models/flower_blue.glb')).scene.children[0];
-    _yellowFlower = (await gltfLoader.loadAsync('/models/flower_yellow.glb')).scene.children[0];
+    _grassMesh = (await gltfLoader.loadAsync('/models/grass.glb')).scene
+      .children[0];
+    _whiteFlower = (await gltfLoader.loadAsync('/models/flower_white.glb'))
+      .scene.children[0];
+    _blueFlower = (await gltfLoader.loadAsync('/models/flower_blue.glb')).scene
+      .children[0];
+    _yellowFlower = (await gltfLoader.loadAsync('/models/flower_yellow.glb'))
+      .scene.children[0];
 
     // The flower is composed of multiple meshes with different materials. Append the
     // wind shader code to each material
     [_whiteFlower, _blueFlower, _yellowFlower].forEach((mesh) => {
       mesh.traverse((o) => {
         if (o.isMesh && o.material) {
-          if (o.material.map) {
-            o.material = new THREE.MeshStandardMaterial({ map: o.material.map, metalness: 0.0, roughness: 1.0 });
-          }
+          o.material = toonifyMaterial(o.material, this.toonOptions, {
+            side: THREE.DoubleSide,
+          });
           this.appendWindShader(o.material);
         }
       });
@@ -127,18 +134,14 @@ export class Grass extends THREE.Object3D {
   }
 
   generateGrass() {
-    const grassMaterial = new THREE.MeshStandardMaterial({
+    const grassMaterial = new THREE.MeshToonMaterial({
       map: _grassMesh.material.map,
-      // Add some emission so grass has some color when not lit
-      emissive: new THREE.Color(0x308040),
-      emissiveIntensity: 0.05,
+      color: new THREE.Color(0x76a84f),
       transparent: false,
       alphaTest: 0.5,
       depthTest: true,
       depthWrite: true,
-      metalness: 0.0,
-      roughness: 1.0,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
     });
 
     this.appendWindShader(grassMaterial, true);
@@ -149,7 +152,8 @@ export class Grass extends THREE.Object3D {
     this.grassMesh = new THREE.InstancedMesh(
       _grassMesh.geometry,
       grassMaterial,
-      this.options.maxInstanceCount);
+      this.options.maxInstanceCount,
+    );
 
     this.generateGrassInstances();
 
@@ -165,33 +169,35 @@ export class Grass extends THREE.Object3D {
       const theta = Math.random() * 2.0 * Math.PI;
 
       // Set position randomly
-      const p = new THREE.Vector3(
-        r * Math.cos(theta),
-        0,
-        r * Math.sin(theta)
-      );
+      const p = new THREE.Vector3(r * Math.cos(theta), 0, r * Math.sin(theta));
 
-      const n = 0.5 + 0.5 * simplex2d(new THREE.Vector2(
-        p.x / this.options.scale,
-        p.z / this.options.scale
-      ));
+      const n =
+        0.5 +
+        0.5 *
+          simplex2d(
+            new THREE.Vector2(
+              p.x / this.options.scale,
+              p.z / this.options.scale,
+            ),
+          );
 
-      if (n > this.options.patchiness && Math.random() + 0.6 > this.options.patchiness) { continue; }
+      if (
+        n > this.options.patchiness &&
+        Math.random() + 0.6 > this.options.patchiness
+      ) {
+        continue;
+      }
 
       dummy.position.copy(p);
 
       // Set rotation randomly
-      dummy.rotation.set(
-        0,
-        2 * Math.PI * Math.random(),
-        0
-      );
+      dummy.rotation.set(0, 2 * Math.PI * Math.random(), 0);
 
       // Set scale randomly
       dummy.scale.set(
         this.options.sizeVariation.x * Math.random() + this.options.size.x,
         this.options.sizeVariation.y * Math.random() + this.options.size.y,
-        this.options.sizeVariation.z * Math.random() + this.options.size.z
+        this.options.sizeVariation.z * Math.random() + this.options.size.z,
       );
 
       // Apply the transformation to the instance
@@ -200,7 +206,8 @@ export class Grass extends THREE.Object3D {
       const color = new THREE.Color(
         0.25 + Math.random() * 0.1,
         0.3 + Math.random() * 0.3,
-        0.1);
+        0.1,
+      );
 
       this.grassMesh.setMatrixAt(count, dummy.matrix);
       this.grassMesh.setColorAt(count, color);
@@ -219,8 +226,8 @@ export class Grass extends THREE.Object3D {
   }
 
   /**
-   * 
-   * @param {THREE.Mesh} flowerMesh 
+   *
+   * @param {THREE.Mesh} flowerMesh
    */
   generateFlowers(flowerMesh) {
     for (let i = 0; i < this.options.flowerCount; i++) {
@@ -228,18 +235,24 @@ export class Grass extends THREE.Object3D {
       const theta = Math.random() * 2.0 * Math.PI;
 
       // Set position randomly
-      const p = new THREE.Vector3(
-        r * Math.cos(theta),
-        0,
-        r * Math.sin(theta)
-      );
+      const p = new THREE.Vector3(r * Math.cos(theta), 0, r * Math.sin(theta));
 
-      const n = 0.5 + 0.5 * simplex2d(new THREE.Vector2(
-        p.x / this.options.scale,
-        p.z / this.options.scale
-      ));
+      const n =
+        0.5 +
+        0.5 *
+          simplex2d(
+            new THREE.Vector2(
+              p.x / this.options.scale,
+              p.z / this.options.scale,
+            ),
+          );
 
-      if (n > this.options.patchiness && Math.random() + 0.8 > this.options.patchiness) { continue; }
+      if (
+        n > this.options.patchiness &&
+        Math.random() + 0.8 > this.options.patchiness
+      ) {
+        continue;
+      }
 
       const flower = flowerMesh.clone();
       flower.position.copy(p);
@@ -252,17 +265,18 @@ export class Grass extends THREE.Object3D {
   }
 
   /**
-   * 
-   * @param {THREE.Material} material 
+   *
+   * @param {THREE.Material} material
    */
   appendWindShader(material, instanced = false) {
-    material.onBeforeCompile = (shader) => {
+    configureToonMaterial(material, this.toonOptions, (shader) => {
       shader.uniforms.uTime = { value: 0 };
       shader.uniforms.uWindStrength = { value: this.options.windStrength };
       shader.uniforms.uWindFrequency = { value: this.options.windFrequency };
       shader.uniforms.uWindScale = { value: this.options.windScale };
 
-      shader.vertexShader = `
+      shader.vertexShader =
+        `
       uniform float uTime;
       uniform vec3 uWindStrength;
       uniform float uWindFrequency;
@@ -318,8 +332,8 @@ export class Grass extends THREE.Object3D {
       );
 
       // To make code reusable for grass and flowers, conditionally multiply by instanceMatrix
-      let vertexShader = instanced ?
-        `
+      let vertexShader = instanced
+        ? `
         vec4 mvPosition = instanceMatrix * vec4(transformed, 1.0);
         float windOffset = 2.0 * 3.14 * simplex2d((modelMatrix * mvPosition).xz / uWindScale);
         vec3 windSway = position.y * uWindStrength * 
@@ -330,8 +344,8 @@ export class Grass extends THREE.Object3D {
         mvPosition = modelViewMatrix * mvPosition;
 
         gl_Position = projectionMatrix * mvPosition;
-        ` :
         `
+        : `
         vec4 mvPosition = vec4(transformed, 1.0);
         float windOffset = 2.0 * 3.14 * simplex2d((modelMatrix * mvPosition).xz / uWindScale);
         vec3 windSway = 0.2 * position.y * uWindStrength * 
@@ -348,10 +362,10 @@ export class Grass extends THREE.Object3D {
       // worldWindDirection = model
       shader.vertexShader = shader.vertexShader.replace(
         `#include <project_vertex>`,
-        vertexShader
+        vertexShader,
       );
 
       material.userData.shader = shader;
-    };
+    });
   }
 }

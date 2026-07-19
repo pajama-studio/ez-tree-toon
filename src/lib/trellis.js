@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { configureToonMaterial } from './toon';
 
 /**
  * Trellis structure for guiding tree branch growth
@@ -26,17 +27,24 @@ export class Trellis extends THREE.Group {
     // Clear existing geometry
     this.dispose();
 
-    this.material = new THREE.MeshStandardMaterial({
-      color: t.color,
-      roughness: 0.8,
-    });
+    if (t.toon?.enabled) {
+      this.material = configureToonMaterial(
+        new THREE.MeshToonMaterial({ color: t.color }),
+        t.toon,
+      );
+    } else {
+      this.material = new THREE.MeshStandardMaterial({
+        color: t.color,
+        roughness: 0.8,
+      });
+    }
 
     // Create shared cylinder geometries
     this.hCylinderGeo = new THREE.CylinderGeometry(
       t.cylinderRadius,
       t.cylinderRadius,
       t.width,
-      8
+      8,
     );
     this.hCylinderGeo.rotateZ(Math.PI / 2);
 
@@ -44,7 +52,7 @@ export class Trellis extends THREE.Group {
       t.cylinderRadius,
       t.cylinderRadius,
       t.height,
-      8
+      8,
     );
 
     // Horizontal lines
@@ -61,7 +69,11 @@ export class Trellis extends THREE.Group {
     for (let i = 0; i < vLineCount; i++) {
       const x = -t.width / 2 + i * t.spacing;
       const mesh = new THREE.Mesh(this.vCylinderGeo, this.material);
-      mesh.position.set(t.position.x + x, t.position.y + t.height / 2, t.position.z);
+      mesh.position.set(
+        t.position.x + x,
+        t.position.y + t.height / 2,
+        t.position.z,
+      );
       this.add(mesh);
     }
   }
@@ -88,11 +100,13 @@ export class Trellis extends THREE.Group {
     const clampedY = Math.max(minY, Math.min(maxY, position.y));
 
     // Find nearest horizontal line (Y = constant)
-    const nearestHLineY = Math.round((clampedY - minY) / t.spacing) * t.spacing + minY;
+    const nearestHLineY =
+      Math.round((clampedY - minY) / t.spacing) * t.spacing + minY;
     const finalHLineY = Math.max(minY, Math.min(maxY, nearestHLineY));
 
     // Find nearest vertical line (X = constant)
-    const nearestVLineX = Math.round((clampedX - minX) / t.spacing) * t.spacing + minX;
+    const nearestVLineX =
+      Math.round((clampedX - minX) / t.spacing) * t.spacing + minX;
     const finalVLineX = Math.max(minX, Math.min(maxX, nearestVLineX));
 
     // Point on nearest horizontal line (X can vary along the line)
@@ -112,7 +126,7 @@ export class Trellis extends THREE.Group {
    * Clean up geometry and materials
    */
   dispose() {
-    this.children.forEach(child => {
+    this.children.forEach((child) => {
       if (child.geometry) {
         child.geometry = null;
       }

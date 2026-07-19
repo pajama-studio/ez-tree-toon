@@ -1,23 +1,23 @@
 {
-  "name": "@dgreenheck/ez-tree",
-  "author": "Daniel Greenheck",
-  "version": "1.1.0",
+  "name": "@pajama-studio/ez-tree-toon",
+  "author": "Daniel Greenheck; Pajama Studio toon adaptation",
+  "version": "0.1.0",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dgreenheck/ez-tree.git"
+    "url": "git+https://github.com/pajama-studio/ez-tree-toon.git"
   },
-  "homepage": "https://dgreenheck.github.io/ez-tree/",
+  "homepage": "https://github.com/pajama-studio/ez-tree-toon",
   "bugs": {
-    "url": "https://github.com/dgreenheck/ez-tree/issues"
+    "url": "https://github.com/pajama-studio/ez-tree-toon/issues"
   },
   "type": "module",
-  "main": "build/ez-tree.umd.js",
-  "module": "build/ez-tree.es.js",
+  "main": "build/ez-tree-toon.umd.js",
+  "module": "build/ez-tree-toon.es.js",
   "exports": {
     ".": {
-      "import": "./build/ez-tree.es.js",
-      "require": "./build/ez-tree.umd.js"
+      "import": "./build/ez-tree-toon.es.js",
+      "require": "./build/ez-tree-toon.umd.js"
     }
   },
   "files": [
@@ -27,22 +27,23 @@
     "package.json",
     "README.md"
   ],
-  "types": "./build/ez-tree.es.d.ts",
+  "types": "./build/ez-tree-toon.es.d.ts",
   "scripts": {
     "dev": "vite --config vite.app.config.js",
     "build:app": "vite build --config vite.app.config.js",
     "build:lib": "vite build --config vite.lib.config.js",
     "build:watch": "vite build --config vite.lib.config.js --watch",
     "app": "npm run build:lib && vite --config vite.app.config.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "npm run build:lib --silent && node scripts/test-toon.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.169.0",
+    "@typescript/typescript6": "^6.0.2",
     "prettier": "3.3.3",
     "three": "^0.167.x",
-    "vite": "^5.0.0",
-    "vite-plugin-dts": "^3.9.1",
-    "vite-plugin-static-copy": "^1.0.5"
+    "vite": "^8.1.5",
+    "vite-plugin-dts": "^5.0.3"
   },
   "peerDependencies": {
     "three": ">=0.167"
@@ -52,7 +53,10 @@
     "three-js",
     "procedural",
     "generation",
-    "tree"
+    "tree",
+    "toon-shading",
+    "normal-baking",
+    "cel-shading"
   ],
   "dependencies": {}
 }
